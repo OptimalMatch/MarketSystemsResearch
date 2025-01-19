@@ -131,10 +131,7 @@ The Trade class represents an executed trade with properties:
 The system is documented with three types of UML diagrams:
 
 1. Class Diagram: Shows the static structure and relationships between classes
-2. Sequence Diagram: Illustrates the order placement and matching process
-3. State Diagram: Depicts the lifecycle of an order in the system
 
-These diagrams provide different views of the system's architecture and behavior.
 
 ```mermaid
 classDiagram
@@ -199,6 +196,7 @@ classDiagram
     OrderBook "1" --> "*" Trade : records
     Order --> "1" OrderSide : has
 ```
+2. Sequence Diagram: Illustrates the order placement and matching process
 
 ```mermaid
 sequenceDiagram
@@ -231,6 +229,8 @@ sequenceDiagram
     M-->>C: trades
     deactivate M
 ```
+3. State Diagram: Depicts the lifecycle of an order in the system
+
 
 ```mermaid
 stateDiagram-v2
@@ -251,3 +251,5 @@ stateDiagram-v2
     Filled --> [*]
     Cancelled --> [*]
 ```
+
+These diagrams provide different views of the system's architecture and behavior.
