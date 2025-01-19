@@ -248,6 +248,12 @@ class Market:
             # Deduct security from seller
             seller_balances[trade.security_id] = seller_balances.get(trade.security_id, Decimal('0')) - trade.size
 
+    def cancel_order(self, security_id: str, order_id: str) -> Optional[Order]:
+        """Cancel an order in the market"""
+        if security_id not in self.orderbooks:
+            raise ValueError(f"No orderbook for security {security_id}")
+        return self.orderbooks[security_id].cancel_order(order_id)
+
     def get_market_depth(self, security_id: str, levels: int = 5) -> dict:
         """Get market depth for a security"""
         if security_id not in self.orderbooks:

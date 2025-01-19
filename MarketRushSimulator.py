@@ -25,11 +25,11 @@ class MarketRushSimulator:
         self.executor = None
 
         # More aggressive price configuration
-        self.min_price_increment = Decimal('0.5')  # Minimum price increase
-        self.max_price_increment = Decimal('2.0')  # Maximum price increase
-        self.order_size_min = 10  # Minimum order size
-        self.order_size_max = 100  # Maximum order size
-        self.aggressive_order_probability = 0.3  # 30% chance of aggressive orders
+        self.min_price_increment = Decimal('5.0')  # Minimum price increase
+        self.max_price_increment = Decimal('10.0')  # Maximum price increase
+        self.order_size_min = 100  # Minimum order size
+        self.order_size_max = 1000  # Maximum order size
+        self.aggressive_order_probability = 0.8  # 80% chance of aggressive orders
 
         # Track the last trade price
         self.last_trade_price = Decimal('100')
@@ -48,14 +48,27 @@ class MarketRushSimulator:
 
         # Trading patterns
         self.wave_patterns = [
-            (50, 0.5),  # (number of orders, price multiplier)
-            (100, 1.0),
-            (200, 1.5),
-            (100, 1.0),
-            (50, 0.5)
+            (50, 1.5),  # Initial surge  (number of orders, price multiplier)
+            (100, 2.0),  # Building momentum
+            (200, 2.5),  # Strong momentum
+            (300, 3.0),  # Peak momentum
+            (400, 3.5),  # Maximum pressure
+            (300, 3.0),  # Sustained pressure
+            (200, 2.5),  # High plateau
+            (100, 2.0),  # Gradual easing
         ]
         self.current_wave = 0
         self.orders_in_current_wave = 0
+
+        # More aggressive momentum settings
+        self.momentum = 1.0
+        self.momentum_increment = 0.2
+        self.max_momentum = 5.0
+
+        # Clustering parameters
+        self.cluster_probability = 0.4
+        self.cluster_size = 5
+        self.cluster_multiplier = 2.0
 
         # Setup signal handler
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -231,8 +244,8 @@ class MarketRushSimulator:
 
         for participant in self.participants:
             try:
-                self.market.deposit(participant, 'cash', Decimal('1000000'))
-                self.market.deposit(participant, self.security_id, Decimal('10000'))
+                self.market.deposit(participant, 'cash', Decimal('100000000'))
+                self.market.deposit(participant, self.security_id, Decimal('1000000'))
             except Exception as e:
                 self.logger.error(f"Error funding participant {participant}: {str(e)}")
 
@@ -249,8 +262,8 @@ def run_simulation():
 
     # Create and start market maker
     maker_id = 'mm001'
-    market.deposit(maker_id, 'cash', Decimal('100000000'))
-    market.deposit(maker_id, security_id, Decimal('1000000'))
+    market.deposit(maker_id, 'cash', Decimal('100000000000'))
+    market.deposit(maker_id, security_id, Decimal('1000000000'))
     mm = MarketMaker(market, maker_id, [security_id])
 
     # Create rush simulator

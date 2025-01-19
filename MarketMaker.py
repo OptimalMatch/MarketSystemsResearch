@@ -1,22 +1,19 @@
 from decimal import Decimal
-from random import random
 from typing import Dict, List, Optional
 import time
 import threading
 from enum import Enum
 import logging
 import statistics
-from datetime import datetime, timedelta
-
+from Exchange import Market, OrderSide
 
 class MarketCondition(Enum):
     BALANCED = "balanced"
     BULL_RUN = "bull_run"
     BEAR_DIP = "bear_dip"
 
-
 class MarketMaker:
-    def __init__(self, market, maker_id: str, securities: List[str]):
+    def __init__(self, market: Market, maker_id: str, securities: List[str]):
         self.market = market
         self.maker_id = maker_id
         self.securities = securities
@@ -24,57 +21,43 @@ class MarketMaker:
         self.thread = None
         self.logger = logging.getLogger(__name__)
 
-        # Configuration parameters
-        self.spread_target = Decimal('0.02')  # 2% target spread
-        self.max_position = Decimal('1000')  # Maximum position size
-        self.min_order_size = Decimal('10')
-        self.max_order_size = Decimal('100')
-        self.price_levels = 3  # Number of price levels to maintain
-        self.refresh_interval = 1.0  # Seconds between updates
+        # More sensitive configuration parameters
+        self.refresh_interval = 0.05  # Faster updates
+        self.volatility_threshold = Decimal('0.005')  # More sensitive (0.5% instead of 1%)
+        self.max_position = Decimal('50000')  # Larger position limit
+        self.min_spread = Decimal('0.001')  # Tighter spreads
+        self.max_spread = Decimal('0.03')  # Smaller maximum spread
+        self.base_order_size = Decimal('500')  # Larger base size
+        self.position_limit_pct = Decimal('0.9')  # Higher position limit
 
-        # Market making state
-        self.positions: Dict[str, Decimal] = {sec: Decimal('0') for sec in securities}
-        self.active_orders: Dict[str, List[str]] = {sec: [] for sec in securities}
-        self.price_history: Dict[str, List[tuple]] = {sec: [] for sec in securities}
+        # Market monitoring parameters
+        self.price_window = 10  # Look at last 10 prices for faster response
+        self.trend_threshold = Decimal('0.003')  # 0.3% trend detection
+        self.momentum_factor = Decimal('1.5')  # Amplify response to trends
 
-        # More aggressive price configuration
-        self.min_price_increment = Decimal('2.0')  # Increased from 0.5
-        self.max_price_increment = Decimal('5.0')  # Increased from 2.0
-        self.order_size_min = 50  # Increased from 10
-        self.order_size_max = 500  # Increased from 100
-        self.aggressive_order_probability = 0.6  # Increased from 0.3
-
-        # Track the last trade price
-        self.last_trade_price = Decimal('100')
-        self.initial_price = self.last_trade_price
-
-        # Trading patterns for stronger momentum
-        self.wave_patterns = [
-            (100, 1.0),  # Warmup phase
-            (200, 1.5),  # Building momentum
-            (300, 2.0),  # Strong momentum
-            (400, 2.5),  # Peak momentum
-            (200, 2.0),  # Sustained pressure
-            (100, 1.5),  # Cooling phase
-        ]
-
-        # Add momentum tracking
-        self.momentum = 1.0
-        self.momentum_increment = 0.1
-        self.max_momentum = 3.0
+        # State tracking
+        self.positions = {sec: Decimal('0') for sec in securities}
+        self.active_orders = {sec: [] for sec in securities}
+        self.price_history = {sec: [] for sec in securities}
+        self.market_stats = {sec: {
+            'volatility': Decimal('0'),
+            'trend': Decimal('0'),
+            'last_price': None,
+            'condition': MarketCondition.BALANCED,
+            'momentum': Decimal('1.0')
+        } for sec in securities}
 
     def start(self):
-        """Start the market making algorithm"""
         if self.is_running:
             return
 
         self.is_running = True
         self.thread = threading.Thread(target=self._run)
+        self.thread.daemon = True
         self.thread.start()
         self.logger.info(f"Market maker {self.maker_id} started")
 
     def stop(self):
-        """Stop the market making algorithm"""
         self.is_running = False
         if self.thread:
             self.thread.join()
@@ -82,249 +65,197 @@ class MarketMaker:
         self.logger.info(f"Market maker {self.maker_id} stopped")
 
     def _run(self):
-        """Main market making loop"""
         while self.is_running:
             try:
                 for security in self.securities:
                     self._update_security(security)
             except Exception as e:
-                self.logger.error(f"Error in market making loop: {str(e)}")
-
+                self.logger.error(f"Error in market maker loop: {str(e)}")
             time.sleep(self.refresh_interval)
-
-    def _place_rush_order(self) -> bool:
-        if not self.is_running:
-            return False
-
-        try:
-            participant = random.choice(self.participants)
-
-            # Get current market depth
-            depth = self.market.get_market_depth(self.security_id)
-            if depth['asks']:
-                current_ask = depth['asks'][0]['price']
-                self.last_trade_price = current_ask
-            else:
-                current_ask = self.last_trade_price
-
-            # Increase momentum with successful trades
-            self.momentum = min(self.momentum + self.momentum_increment, self.max_momentum)
-
-            # Determine if this should be an aggressive order
-            is_aggressive = random.random() < self.aggressive_order_probability
-
-            # Calculate price increment based on wave pattern and momentum
-            wave_orders, wave_multiplier = self.wave_patterns[self.current_wave]
-            base_increment = random.uniform(
-                float(self.min_price_increment),
-                float(self.max_price_increment)
-            )
-
-            # Apply momentum to price increment
-            if is_aggressive:
-                price_increment = Decimal(str(base_increment * wave_multiplier * self.momentum * 2))
-            else:
-                price_increment = Decimal(str(base_increment * wave_multiplier * self.momentum))
-
-            # Calculate buy price above current ask
-            buy_price = current_ask + price_increment
-
-            # Calculate size based on aggressiveness and momentum
-            if is_aggressive:
-                size = Decimal(str(random.randint(
-                    self.order_size_max // 2,
-                    int(self.order_size_max * self.momentum)
-                )))
-            else:
-                size = Decimal(str(random.randint(
-                    self.order_size_min,
-                    self.order_size_max // 2
-                )))
-
-            # Place the order
-            self.market.place_order(
-                owner_id=participant,
-                security_id=self.security_id,
-                side=OrderSide.BUY,
-                price=buy_price,
-                size=size
-            )
-
-            # Update wave pattern with faster progression
-            self.orders_in_current_wave += 1
-            if self.orders_in_current_wave >= wave_orders:
-                self.current_wave = (self.current_wave + 1) % len(self.wave_patterns)
-                self.orders_in_current_wave = 0
-
-            # Update stats
-            self.stats['current_price'] = buy_price
-            self.stats['highest_price'] = max(self.stats['highest_price'], buy_price)
-            self.stats['volume'] += size
-
-            if self.stats['start_price'] > 0:
-                self.stats['price_movement_percent'] = (
-                        (buy_price - self.stats['start_price']) /
-                        self.stats['start_price'] * 100
-                )
-
-            return True
-
-        except Exception as e:
-            self.logger.error(f"Order placement failed: {str(e)}")
-            return False
-
-    def initialize_participants(self):
-        """Initialize participants with much more funding"""
-        self.participants = [f'rush_trader_{i}' for i in range(self.num_participants)]
-
-        for participant in self.participants:
-            try:
-                # Increased funding for more aggressive trading
-                self.market.deposit(participant, 'cash', Decimal('10000000'))
-                self.market.deposit(participant, self.security_id, Decimal('100000'))
-            except Exception as e:
-                self.logger.error(f"Error funding participant {participant}: {str(e)}")
 
     def _update_security(self, security: str):
         """Update market making for a single security"""
-        # Get current market state
-        depth = self.market.get_market_depth(security)
-        condition = self._analyze_market_condition(security, depth)
+        try:
+            # Get market state
+            depth = self.market.get_market_depth(security)
 
-        # Update price history
-        current_price = self._get_mid_price(depth)
-        if current_price:
-            self.price_history[security].append((datetime.now(), current_price))
-            # Keep only last hour of price history
-            cutoff = datetime.now() - timedelta(hours=1)
-            self.price_history[security] = [
-                (t, p) for t, p in self.price_history[security]
-                if t > cutoff
+            # Update price history even if depth is empty
+            current_price = None
+            if depth and depth.get('asks') and depth['asks']:
+                current_price = depth['asks'][0]['price']
+            elif depth and depth.get('bids') and depth['bids']:
+                current_price = depth['bids'][0]['price']
+            else:
+                current_price = self.market_stats[security]['last_price'] or Decimal('100')
+
+            if current_price:
+                self.price_history[security].append(current_price)
+                self.market_stats[security]['last_price'] = current_price
+
+                # Keep only recent price history
+                if len(self.price_history[security]) > 50:
+                    self.price_history[security].pop(0)
+
+            # Analyze market condition
+            condition = self._analyze_market_condition(security)
+            old_condition = self.market_stats[security]['condition']
+            if condition != old_condition:
+                self.logger.info(f"Market condition changed for {security}: {old_condition.value} -> {condition.value}")
+
+            self.market_stats[security]['condition'] = condition
+
+            # Calculate new orders
+            params = self._calculate_order_parameters(security, condition)
+            if params:
+                # Cancel existing orders
+                old_orders = len(self.active_orders[security])
+                if old_orders > 0:
+                    self._cancel_security_orders(security)
+                    self.logger.info(f"Cancelled {old_orders} orders for {security}")
+
+                # Place new orders
+                self._place_new_orders(security, params)
+            else:
+                self.logger.warning(f"Skipping order placement for {security} - no parameters calculated")
+
+        except Exception as e:
+            self.logger.error(f"Error updating security {security}: {str(e)}")
+
+    def _analyze_market_condition(self, security: str) -> MarketCondition:
+        """Enhanced market condition analysis"""
+        if not self.price_history[security] or len(self.price_history[security]) < 2:
+            return MarketCondition.BALANCED
+
+        try:
+            # Use recent price history for faster response
+            prices = self.price_history[security][-self.price_window:]
+            price_changes = [
+                (prices[i] - prices[i - 1]) / prices[i - 1]
+                for i in range(1, len(prices))
             ]
 
-        # Cancel existing orders
-        self._cancel_security_orders(security)
+            if not price_changes:
+                return MarketCondition.BALANCED
 
-        # Calculate new order parameters based on market condition
-        params = self._calculate_order_params(security, depth, condition)
-        if not params:
-            return
+            # Calculate trend metrics
+            avg_change = sum(price_changes) / len(price_changes)
+            recent_volatility = statistics.stdev(price_changes) if len(price_changes) > 1 else Decimal('0')
 
-        # Place new orders
-        self._place_orders(security, params)
+            # Calculate short-term momentum
+            short_term_return = (prices[-1] - prices[0]) / prices[0]
 
-    def _analyze_market_condition(self, security: str, depth: dict) -> MarketCondition:
-        """Analyze current market condition"""
-        if not self.price_history[security]:
-            return MarketCondition.BALANCED
+            # Update market stats
+            self.market_stats[security]['volatility'] = Decimal(str(recent_volatility))
+            self.market_stats[security]['trend'] = Decimal(str(avg_change))
 
-        # Calculate price volatility
-        recent_prices = [p for _, p in self.price_history[security][-10:]]
-        if len(recent_prices) < 2:
-            return MarketCondition.BALANCED
+            # Momentum adjustment
+            if abs(short_term_return) > self.trend_threshold:
+                self.market_stats[security]['momentum'] *= self.momentum_factor
+            else:
+                self.market_stats[security]['momentum'] = Decimal('1.0')
 
-        price_changes = [
-            (recent_prices[i] - recent_prices[i - 1]) / recent_prices[i - 1]
-            for i in range(1, len(recent_prices))
-        ]
+            # More sensitive market condition detection
+            if avg_change > self.volatility_threshold:
+                return MarketCondition.BULL_RUN
+            elif avg_change < -self.volatility_threshold:
+                return MarketCondition.BEAR_DIP
 
-        avg_change = statistics.mean(price_changes)
+        except Exception as e:
+            self.logger.error(f"Error in market condition analysis: {str(e)}")
 
-        # Detect market condition based on recent price movement
-        if avg_change > Decimal('0.01'):  # 1% average increase
-            return MarketCondition.BULL_RUN
-        elif avg_change < Decimal('-0.01'):  # 1% average decrease
-            return MarketCondition.BEAR_DIP
-        else:
-            return MarketCondition.BALANCED
+        return MarketCondition.BALANCED
 
-    def _calculate_order_params(self, security: str, depth: dict,
-                                condition: MarketCondition) -> Optional[Dict]:
-        """Calculate order parameters based on market condition"""
-        mid_price = self._get_mid_price(depth)
-        if not mid_price:
+    def _calculate_order_parameters(self, security: str, condition: MarketCondition):
+        """Enhanced order parameter calculation"""
+        try:
+            depth = self.market.get_market_depth(security)
+
+            # Get or estimate current price
+            current_price = self._get_mid_price(depth)
+            if not current_price:
+                current_price = self.market_stats[security]['last_price'] or Decimal('100')
+                self.logger.info(f"Using fallback price: {current_price}")
+
+            stats = self.market_stats[security]
+            volatility = stats['volatility']
+            trend = stats['trend']
+
+            # Base sizing parameters
+            base_size = self.base_order_size
+            if condition == MarketCondition.BULL_RUN:
+                buy_size = base_size * Decimal('0.5')  # Reduce buying in bull market
+                sell_size = base_size * Decimal('2.0')  # Increase selling in bull market
+                spread_multiplier = Decimal('1.2')
+            elif condition == MarketCondition.BEAR_DIP:
+                buy_size = base_size * Decimal('2.0')  # Increase buying in bear market
+                sell_size = base_size * Decimal('0.5')  # Reduce selling in bear market
+                spread_multiplier = Decimal('1.2')
+            else:
+                buy_size = sell_size = base_size
+                spread_multiplier = Decimal('1.0')
+
+            # Calculate spread based on volatility
+            spread = max(
+                min(
+                    self.min_spread * (1 + volatility * Decimal('10')),
+                    self.max_spread
+                ),
+                self.min_spread
+            ) * spread_multiplier
+
+            # Generate price levels
+            levels = 3
+            buy_prices = []
+            sell_prices = []
+            buy_sizes = []
+            sell_sizes = []
+
+            for i in range(levels):
+                level_multiplier = Decimal(str(i + 1))
+
+                # Calculate prices with progressive spreads
+                buy_price = current_price * (1 - spread * level_multiplier)
+                sell_price = current_price * (1 + spread * level_multiplier)
+
+                # Calculate sizes with decay for further levels
+                level_size_multiplier = Decimal('1') / (level_multiplier * Decimal('1.2'))
+                buy_level_size = buy_size * level_size_multiplier
+                sell_level_size = sell_size * level_size_multiplier
+
+                buy_prices.append(buy_price)
+                sell_prices.append(sell_price)
+                buy_sizes.append(buy_level_size)
+                sell_sizes.append(sell_level_size)
+
+            self.logger.info(f"Calculated order parameters for {security}:")
+            self.logger.info(f"Current price: {current_price}")
+            self.logger.info(f"Spread: {spread}")
+            self.logger.info(f"Buy prices: {buy_prices}")
+            self.logger.info(f"Sell prices: {sell_prices}")
+
+            return {
+                'buy_prices': buy_prices,
+                'sell_prices': sell_prices,
+                'buy_sizes': buy_sizes,
+                'sell_sizes': sell_sizes
+            }
+
+        except Exception as e:
+            self.logger.error(f"Error calculating order parameters: {str(e)}")
             return None
 
-        params = {
-            'spread': self.spread_target,
-            'sizes': [],
-            'prices': []
-        }
+    def _get_mid_price(self, depth: dict) -> Optional[Decimal]:
+        """Calculate mid price from market depth"""
+        try:
+            if not depth['bids'] or not depth['asks']:
+                return None
 
-        # Adjust parameters based on market condition
-        if condition == MarketCondition.BULL_RUN:
-            # Provide more selling liquidity during bull runs
-            params['spread'] = self.spread_target * Decimal('0.8')  # Tighter spread
-            sell_sizes = [self.max_order_size] * self.price_levels
-            buy_sizes = [self.min_order_size] * self.price_levels
+            best_bid = depth['bids'][0]['price']
+            best_ask = depth['asks'][0]['price']
+            return (best_bid + best_ask) / Decimal('2')
 
-            # Price levels above current price
-            sell_prices = [
-                mid_price * (1 + params['spread'] * (i + 1))
-                for i in range(self.price_levels)
-            ]
-            # Price levels below current price
-            buy_prices = [
-                mid_price * (1 - params['spread'] * (i + 1) * Decimal('1.5'))
-                for i in range(self.price_levels)
-            ]
-
-        elif condition == MarketCondition.BEAR_DIP:
-            # Provide more buying liquidity during dips
-            params['spread'] = self.spread_target * Decimal('0.8')
-            sell_sizes = [self.min_order_size] * self.price_levels
-            buy_sizes = [self.max_order_size] * self.price_levels
-
-            sell_prices = [
-                mid_price * (1 + params['spread'] * (i + 1) * Decimal('1.5'))
-                for i in range(self.price_levels)
-            ]
-            buy_prices = [
-                mid_price * (1 - params['spread'] * (i + 1))
-                for i in range(self.price_levels)
-            ]
-
-        else:  # BALANCED
-            params['spread'] = self.spread_target
-            size = (self.min_order_size + self.max_order_size) / 2
-            sell_sizes = [size] * self.price_levels
-            buy_sizes = [size] * self.price_levels
-
-            sell_prices = [
-                mid_price * (1 + params['spread'] * (i + 1))
-                for i in range(self.price_levels)
-            ]
-            buy_prices = [
-                mid_price * (1 - params['spread'] * (i + 1))
-                for i in range(self.price_levels)
-            ]
-
-        params['sizes'] = list(zip(buy_sizes, sell_sizes))
-        params['prices'] = list(zip(buy_prices, sell_prices))
-
-        return params
-
-    def _place_orders(self, security: str, params: Dict):
-        """Place new orders based on calculated parameters"""
-        for (buy_size, sell_size), (buy_price, sell_price) in zip(
-                params['sizes'], params['prices']):
-
-            # Check position limits
-            if abs(self.positions[security]) < self.max_position:
-                try:
-                    # Place buy order
-                    order_id = self.market.place_order(
-                        self.maker_id, security, OrderSide.BUY, buy_price, buy_size
-                    )
-                    self.active_orders[security].append(order_id)
-
-                    # Place sell order
-                    order_id = self.market.place_order(
-                        self.maker_id, security, OrderSide.SELL, sell_price, sell_size
-                    )
-                    self.active_orders[security].append(order_id)
-                except Exception as e:
-                    self.logger.error(f"Error placing orders: {str(e)}")
+        except (KeyError, IndexError):
+            return None
 
     def _cancel_security_orders(self, security: str):
         """Cancel all active orders for a security"""
@@ -340,15 +271,6 @@ class MarketMaker:
         for security in self.securities:
             self._cancel_security_orders(security)
 
-    def _get_mid_price(self, depth: dict) -> Optional[Decimal]:
-        """Calculate mid price from market depth"""
-        if not depth['bids'] or not depth['asks']:
-            return None
-
-        best_bid = depth['bids'][0]['price']
-        best_ask = depth['asks'][0]['price']
-        return (best_bid + best_ask) / 2
-
     def update_position(self, security: str, quantity: Decimal):
         """Update position after trade execution"""
         self.positions[security] += quantity
@@ -357,30 +279,121 @@ class MarketMaker:
         """Get current position for a security"""
         return self.positions[security]
 
-    def get_market_stats(self, security: str) -> Dict:
+    def get_market_stats(self, security_id: str) -> Dict:
         """Get current market making statistics"""
         return {
-            'position': self.positions[security],
-            'active_orders': len(self.active_orders[security]),
-            'last_price': self._get_mid_price(
-                self.market.get_market_depth(security)
-            ),
-            'condition': self._analyze_market_condition(
-                security,
-                self.market.get_market_depth(security)
-            ).value
+            'position': self.positions[security_id],
+            'condition': self.market_stats[security_id]['condition'].value,
+            'last_price': self.market_stats[security_id]['last_price']
         }
 
+    def process_trade(self, security: str, trade_info: dict):
+        """Process a completed trade and update positions"""
+        try:
+            # Log trade details
+            self.logger.info(f"Processing trade for {security}: {trade_info}")
 
-# Example usage
+            # Update position based on trade
+            if trade_info['buyer_id'] == self.maker_id:
+                self.positions[security] += trade_info['size']
+                self.logger.info(f"Position increased by {trade_info['size']}")
+            elif trade_info['seller_id'] == self.maker_id:
+                self.positions[security] -= trade_info['size']
+                self.logger.info(f"Position decreased by {trade_info['size']}")
+
+            # Log new position
+            self.logger.info(f"New position for {security}: {self.positions[security]}")
+
+            # Update market stats
+            self.market_stats[security]['last_price'] = trade_info['price']
+
+            # Calculate P&L if needed
+            # ... (add P&L tracking if desired)
+
+        except Exception as e:
+            self.logger.error(f"Error processing trade: {str(e)}")
+
+    def get_detailed_stats(self, security_id: str) -> Dict:
+        """Get detailed market making statistics"""
+        stats = {
+            'position': self.positions[security_id],
+            'condition': self.market_stats[security_id]['condition'].value,
+            'last_price': self.market_stats[security_id]['last_price'],
+            'active_orders': len(self.active_orders[security_id]),
+            'price_history_length': len(self.price_history[security_id]),
+            'volatility': float(self.market_stats[security_id]['volatility']),
+            'trend': float(self.market_stats[security_id]['trend'])
+        }
+
+        if security_id in self.price_history and self.price_history[security_id]:
+            stats['price_change'] = float(
+                (self.price_history[security_id][-1] - self.price_history[security_id][0]) /
+                self.price_history[security_id][0] * 100
+            )
+        else:
+            stats['price_change'] = 0.0
+
+        return stats
+
+    def _place_new_orders(self, security: str, params: dict):
+        """Place new orders based on calculated parameters"""
+        try:
+            position = self.positions[security]
+            position_limit = self.max_position * self.position_limit_pct
+            orders_placed = 0
+
+            # Place buy orders if we have room
+            if position < position_limit:
+                for price, size in zip(params['buy_prices'], params['buy_sizes']):
+                    adjusted_size = min(size, (position_limit - position))
+                    if adjusted_size > 0:
+                        try:
+                            self.logger.info(f"Placing buy order: price={price}, size={adjusted_size}")
+                            order_id = self.market.place_order(
+                                self.maker_id,
+                                security,
+                                OrderSide.BUY,
+                                price,
+                                adjusted_size
+                            )
+                            if order_id:
+                                self.active_orders[security].append(order_id)
+                                orders_placed += 1
+                                self.logger.info(f"Buy order placed successfully: {order_id}")
+                        except Exception as e:
+                            self.logger.error(f"Error placing buy order: {str(e)}")
+
+            # Place sell orders if we have room
+            if position > -position_limit:
+                for price, size in zip(params['sell_prices'], params['sell_sizes']):
+                    adjusted_size = min(size, (position_limit + position))
+                    if adjusted_size > 0:
+                        try:
+                            self.logger.info(f"Placing sell order: price={price}, size={adjusted_size}")
+                            order_id = self.market.place_order(
+                                self.maker_id,
+                                security,
+                                OrderSide.SELL,
+                                price,
+                                adjusted_size
+                            )
+                            if order_id:
+                                self.active_orders[security].append(order_id)
+                                orders_placed += 1
+                                self.logger.info(f"Sell order placed successfully: {order_id}")
+                        except Exception as e:
+                            self.logger.error(f"Error placing sell order: {str(e)}")
+
+            self.logger.info(f"Placed {orders_placed} new orders for {security}")
+
+        except Exception as e:
+            self.logger.error(f"Error in place_new_orders: {str(e)}")
+
 if __name__ == "__main__":
-    from Exchange import Market, OrderSide
-
-    # Create market and initialize
+    # Example usage
     market = Market()
     market.create_orderbook('AAPL')
 
-    # Create and start market maker
     maker_id = 'mm001'
     market.deposit(maker_id, 'cash', Decimal('1000000'))
     market.deposit(maker_id, 'AAPL', Decimal('10000'))
@@ -389,17 +402,13 @@ if __name__ == "__main__":
 
     try:
         mm.start()
-
-        # Monitor market maker activity
         while True:
             stats = mm.get_market_stats('AAPL')
             print(f"\nMarket Maker Stats:")
             print(f"Position: {stats['position']}")
-            print(f"Active Orders: {stats['active_orders']}")
-            print(f"Last Price: {stats['last_price']}")
             print(f"Market Condition: {stats['condition']}")
+            print(f"Last Price: {stats['last_price']}")
             time.sleep(5)
-
     except KeyboardInterrupt:
         print("\nStopping market maker...")
         mm.stop()
