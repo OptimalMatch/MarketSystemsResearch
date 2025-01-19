@@ -20,20 +20,37 @@ class MarketRushSimulator:
         self.is_running = False
         self.thread = None
         self.logger = logging.getLogger(__name__)
-        self.participants: List[str] = []
         self.price_queue = queue.Queue()
         self.executor = None
 
-        # More aggressive price configuration
-        self.min_price_increment = Decimal('5.0')  # Minimum price increase
-        self.max_price_increment = Decimal('10.0')  # Maximum price increase
-        self.order_size_min = 100  # Minimum order size
-        self.order_size_max = 1000  # Maximum order size
-        self.aggressive_order_probability = 0.8  # 80% chance of aggressive orders
+        # More controlled price configuration
+        self.min_price_increment = Decimal('0.05')  # 5 cents minimum
+        self.max_price_increment = Decimal('0.25')  # 25 cents maximum
+        self.order_size_min = 10  # Minimum order size
+        self.order_size_max = 100  # Maximum order size
+        self.aggressive_order_probability = 0.3  # 30% aggressive orders
 
         # Track the last trade price
         self.last_trade_price = Decimal('100')
         self.initial_price = self.last_trade_price
+
+        # More controlled wave patterns
+        self.wave_patterns = [
+            (100, 1.0),  # Normal trading
+            (200, 1.2),  # Building pressure
+            (300, 1.5),  # Increased pressure
+            (200, 1.2),  # Easing
+            (100, 1.0)  # Back to normal
+        ]
+
+        # Momentum control
+        self.momentum = Decimal('1.0')
+        self.momentum_increment = Decimal('0.01')
+        self.max_momentum = Decimal('1.5')
+        self.min_momentum = Decimal('0.5')
+
+        self.current_wave = 0
+        self.orders_in_current_wave = 0
 
         self.stats = {
             'total_orders': 0,
@@ -45,33 +62,6 @@ class MarketRushSimulator:
             'highest_price': self.initial_price,
             'volume': Decimal('0')
         }
-
-        # Trading patterns
-        self.wave_patterns = [
-            (50, 1.5),  # Initial surge  (number of orders, price multiplier)
-            (100, 2.0),  # Building momentum
-            (200, 2.5),  # Strong momentum
-            (300, 3.0),  # Peak momentum
-            (400, 3.5),  # Maximum pressure
-            (300, 3.0),  # Sustained pressure
-            (200, 2.5),  # High plateau
-            (100, 2.0),  # Gradual easing
-        ]
-        self.current_wave = 0
-        self.orders_in_current_wave = 0
-
-        # More aggressive momentum settings
-        self.momentum = 1.0
-        self.momentum_increment = 0.2
-        self.max_momentum = 5.0
-
-        # Clustering parameters
-        self.cluster_probability = 0.4
-        self.cluster_size = 5
-        self.cluster_multiplier = 2.0
-
-        # Setup signal handler
-        signal.signal(signal.SIGINT, self._signal_handler)
 
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals gracefully"""
@@ -161,7 +151,6 @@ class MarketRushSimulator:
             self.is_running = False
 
     def _place_rush_order(self) -> bool:
-        """Place a single rush order"""
         if not self.is_running:
             return False
 
@@ -171,39 +160,49 @@ class MarketRushSimulator:
             # Get current market depth
             depth = self.market.get_market_depth(self.security_id)
             if depth['asks']:
-                current_ask = depth['asks'][0]['price']
-                self.last_trade_price = current_ask
+                current_price = depth['asks'][0]['price']
             else:
-                current_ask = self.last_trade_price
+                current_price = self.last_trade_price
+
+            # Apply controlled momentum - convert to Decimal
+            self.momentum += self.momentum_increment
+            self.momentum = min(max(self.momentum, self.min_momentum), self.max_momentum)
 
             # Determine if this should be an aggressive order
-            is_aggressive = random.random() < self.aggressive_order_probability
+            is_aggressive = random.random() < float(self.aggressive_order_probability)
 
-            # Calculate price increment based on wave pattern
+            # Calculate price increment using Decimal throughout
             wave_orders, wave_multiplier = self.wave_patterns[self.current_wave]
-            base_increment = random.uniform(
+            base_increment = Decimal(str(random.uniform(
                 float(self.min_price_increment),
                 float(self.max_price_increment)
-            )
+            )))
 
+            wave_multiplier = Decimal(str(wave_multiplier))  # Convert to Decimal
+
+            # Calculate controlled price increment
             if is_aggressive:
-                price_increment = Decimal(str(base_increment * wave_multiplier * 2))
+                price_increment = base_increment * wave_multiplier * self.momentum
             else:
-                price_increment = Decimal(str(base_increment * wave_multiplier))
+                price_increment = base_increment * wave_multiplier
 
-            # Calculate buy price above current ask
-            buy_price = current_ask + price_increment
+            # Ensure reasonable price movement
+            max_increment = current_price * Decimal('0.01')  # Max 1% move per order
+            price_increment = min(price_increment, max_increment)
 
-            # Calculate size based on aggressiveness
+            # Calculate buy price
+            buy_price = current_price + price_increment
+
+            # Calculate reasonable size - convert to Decimal
             if is_aggressive:
                 size = Decimal(str(random.randint(
-                    self.order_size_max // 2,
-                    self.order_size_max
+                    int(float(self.order_size_max)) // 2,
+                    int(float(self.order_size_max))
                 )))
             else:
                 size = Decimal(str(random.randint(
-                    self.order_size_min,
-                    self.order_size_max // 2
+                    int(float(self.order_size_min)),
+                    int(float(self.order_size_max)) // 2
                 )))
 
             # Place the order
@@ -229,7 +228,7 @@ class MarketRushSimulator:
             if self.stats['start_price'] > 0:
                 self.stats['price_movement_percent'] = (
                         (buy_price - self.stats['start_price']) /
-                        self.stats['start_price'] * 100
+                        self.stats['start_price'] * Decimal('100')
                 )
 
             return True
@@ -241,6 +240,7 @@ class MarketRushSimulator:
     def initialize_participants(self):
         """Initialize participants with more funding"""
         self.participants = [f'rush_trader_{i}' for i in range(self.num_participants)]
+        logging.debug(f"Initializing {len(self.participants)} participants")
 
         for participant in self.participants:
             try:

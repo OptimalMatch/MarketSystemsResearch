@@ -1,11 +1,14 @@
 from decimal import Decimal
 from typing import Dict, List, Optional
-import time
+#import time
+from time import sleep
 import threading
 from enum import Enum
 import logging
 import statistics
 from Exchange import Market, OrderSide
+
+#logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - MARKETMAKER - %(message)s')
 
 class MarketCondition(Enum):
     BALANCED = "balanced"
@@ -21,21 +24,21 @@ class MarketMaker:
         self.thread = None
         self.logger = logging.getLogger(__name__)
 
-        # More sensitive configuration parameters
+        # More aggressive configuration
         self.refresh_interval = 0.05  # Faster updates
-        self.volatility_threshold = Decimal('0.005')  # More sensitive (0.5% instead of 1%)
-        self.max_position = Decimal('50000')  # Larger position limit
-        self.min_spread = Decimal('0.001')  # Tighter spreads
-        self.max_spread = Decimal('0.03')  # Smaller maximum spread
-        self.base_order_size = Decimal('500')  # Larger base size
-        self.position_limit_pct = Decimal('0.9')  # Higher position limit
+        self.volatility_threshold = Decimal('0.002')  # More sensitive (0.2%)
+        self.max_position = Decimal('100000')  # Much larger position limit
+        self.min_spread = Decimal('0.0005')  # Tighter spreads (0.05%)
+        self.max_spread = Decimal('0.02')  # Smaller maximum spread (2%)
+        self.base_order_size = Decimal('1000')  # Larger base size
+        self.position_limit_pct = Decimal('0.95')  # Higher position limit
 
-        # Market monitoring parameters
-        self.price_window = 10  # Look at last 10 prices for faster response
-        self.trend_threshold = Decimal('0.003')  # 0.3% trend detection
-        self.momentum_factor = Decimal('1.5')  # Amplify response to trends
+        # Market monitoring
+        self.price_window = 5  # Look at last 5 prices for faster response
+        self.trend_threshold = Decimal('0.001')  # More sensitive trend detection
+        self.momentum_factor = Decimal('1.5')  # Stronger momentum response
 
-        # State tracking
+        # Initialize state
         self.positions = {sec: Decimal('0') for sec in securities}
         self.active_orders = {sec: [] for sec in securities}
         self.price_history = {sec: [] for sec in securities}
@@ -44,7 +47,10 @@ class MarketMaker:
             'trend': Decimal('0'),
             'last_price': None,
             'condition': MarketCondition.BALANCED,
-            'momentum': Decimal('1.0')
+            'momentum': Decimal('1.0'),
+            'trades_count': 0,
+            'last_trade_time': None,
+            'total_volume': Decimal('0')
         } for sec in securities}
 
     def start(self):
@@ -71,11 +77,15 @@ class MarketMaker:
                     self._update_security(security)
             except Exception as e:
                 self.logger.error(f"Error in market maker loop: {str(e)}")
-            time.sleep(self.refresh_interval)
+            sleep(self.refresh_interval)
 
     def _update_security(self, security: str):
         """Update market making for a single security"""
         try:
+            # Log active orders before update
+            active_orders = self.active_orders.get(security, [])
+            logging.debug(f"Active orders for {security}: {active_orders}")
+
             # Get market state
             depth = self.market.get_market_depth(security)
 
@@ -118,6 +128,9 @@ class MarketMaker:
             else:
                 self.logger.warning(f"Skipping order placement for {security} - no parameters calculated")
 
+            # Log active orders after placing new ones
+            active_orders_after = self.active_orders.get(security, [])
+            logging.debug(f"Active orders for {security} after update: {active_orders_after}")
         except Exception as e:
             self.logger.error(f"Error updating security {security}: {str(e)}")
 
@@ -169,9 +182,11 @@ class MarketMaker:
         """Enhanced order parameter calculation"""
         try:
             depth = self.market.get_market_depth(security)
+            logging.debug(f"Market Depth for {security}: {depth}")
 
             # Get or estimate current price
             current_price = self._get_mid_price(depth)
+            logging.debug(f"Calculated current price for {security}: {current_price}")
             if not current_price:
                 current_price = self.market_stats[security]['last_price'] or Decimal('100')
                 self.logger.info(f"Using fallback price: {current_price}")
@@ -233,12 +248,14 @@ class MarketMaker:
             self.logger.info(f"Buy prices: {buy_prices}")
             self.logger.info(f"Sell prices: {sell_prices}")
 
-            return {
+            params = {
                 'buy_prices': buy_prices,
                 'sell_prices': sell_prices,
                 'buy_sizes': buy_sizes,
                 'sell_sizes': sell_sizes
             }
+            logging.debug(f"Order parameters for {security}: {params}")
+            return params
 
         except Exception as e:
             self.logger.error(f"Error calculating order parameters: {str(e)}")
@@ -247,14 +264,14 @@ class MarketMaker:
     def _get_mid_price(self, depth: dict) -> Optional[Decimal]:
         """Calculate mid price from market depth"""
         try:
+            logging.debug(f"Market Depth for {depth}: {depth}")
             if not depth['bids'] or not depth['asks']:
                 return None
-
             best_bid = depth['bids'][0]['price']
             best_ask = depth['asks'][0]['price']
             return (best_bid + best_ask) / Decimal('2')
-
-        except (KeyError, IndexError):
+        except (KeyError, IndexError) as e:
+            logging.error(f"Error accessing market depth: {e}")
             return None
 
     def _cancel_security_orders(self, security: str):
@@ -336,58 +353,130 @@ class MarketMaker:
         return stats
 
     def _place_new_orders(self, security: str, params: dict):
-        """Place new orders based on calculated parameters"""
+        """Place new orders with proper error handling"""
         try:
+            cash_balance = self._get_cash_balance()
+            security_balance = self._get_security_balance(security)
+            logging.debug(f"Balances - Cash: {cash_balance}, Security: {security_balance}")
+
+            if cash_balance <= 0 or security_balance <= 0:
+                self.logger.warning(f"Insufficient balances. Cash: {cash_balance}, Security: {security_balance}")
+                return
+
             position = self.positions[security]
             position_limit = self.max_position * self.position_limit_pct
             orders_placed = 0
 
-            # Place buy orders if we have room
-            if position < position_limit:
-                for price, size in zip(params['buy_prices'], params['buy_sizes']):
-                    adjusted_size = min(size, (position_limit - position))
-                    if adjusted_size > 0:
-                        try:
-                            self.logger.info(f"Placing buy order: price={price}, size={adjusted_size}")
+            # Get current market depth
+            depth = self.market.get_market_depth(security)
+            current_price = self._get_current_price(depth, security)
+
+            self.logger.info(f"\nPlacing orders for {security}:")
+            self.logger.info(f"Current price: {current_price}")
+            self.logger.info(f"Current position: {position}")
+
+            # Check balances
+            cash_balance = self._get_cash_balance()
+            security_balance = self._get_security_balance(security)
+
+            if cash_balance <= 0 or security_balance <= 0:
+                self.logger.warning("Insufficient balance for order placement")
+                return
+
+            # Calculate safe order sizes
+            max_order_size = min(
+                Decimal('100'),  # Base size
+                cash_balance / current_price / Decimal('10'),  # 10% of cash
+                security_balance / Decimal('10')  # 10% of security balance
+            )
+
+            # Generate order levels
+            spread = Decimal('0.001')  # 0.1% spread
+            levels = 3
+
+            for i in range(levels):
+                level_factor = Decimal(str(i + 1))
+                size_factor = Decimal('1') / level_factor
+
+                # Calculate buy parameters
+                buy_size = max_order_size * size_factor
+                buy_price = current_price * (Decimal('1') - spread * level_factor)
+
+                # Calculate sell parameters
+                sell_size = max_order_size * size_factor
+                sell_price = current_price * (Decimal('1') + spread * level_factor)
+
+                # Place buy order if we have room
+                if position < position_limit:
+                    try:
+                        adjusted_buy_size = min(buy_size, (position_limit - position))
+                        if adjusted_buy_size > 0:
+                            self.logger.info(f"Placing buy order: {adjusted_buy_size} @ {buy_price}")
                             order_id = self.market.place_order(
                                 self.maker_id,
                                 security,
                                 OrderSide.BUY,
-                                price,
-                                adjusted_size
+                                buy_price,
+                                adjusted_buy_size
                             )
                             if order_id:
                                 self.active_orders[security].append(order_id)
+                                position += adjusted_buy_size
                                 orders_placed += 1
-                                self.logger.info(f"Buy order placed successfully: {order_id}")
-                        except Exception as e:
-                            self.logger.error(f"Error placing buy order: {str(e)}")
+                    except Exception as e:
+                        self.logger.error(f"Error placing buy order: {str(e)}")
 
-            # Place sell orders if we have room
-            if position > -position_limit:
-                for price, size in zip(params['sell_prices'], params['sell_sizes']):
-                    adjusted_size = min(size, (position_limit + position))
-                    if adjusted_size > 0:
-                        try:
-                            self.logger.info(f"Placing sell order: price={price}, size={adjusted_size}")
+                # Place sell order if we have room
+                if position > -position_limit:
+                    try:
+                        adjusted_sell_size = min(sell_size, (position_limit + position))
+                        if adjusted_sell_size > 0:
+                            self.logger.info(f"Placing sell order: {adjusted_sell_size} @ {sell_price}")
                             order_id = self.market.place_order(
                                 self.maker_id,
                                 security,
                                 OrderSide.SELL,
-                                price,
-                                adjusted_size
+                                sell_price,
+                                adjusted_sell_size
                             )
                             if order_id:
                                 self.active_orders[security].append(order_id)
+                                position -= adjusted_sell_size
                                 orders_placed += 1
-                                self.logger.info(f"Sell order placed successfully: {order_id}")
-                        except Exception as e:
-                            self.logger.error(f"Error placing sell order: {str(e)}")
+                    except Exception as e:
+                        self.logger.error(f"Error placing sell order: {str(e)}")
 
-            self.logger.info(f"Placed {orders_placed} new orders for {security}")
+            self.logger.info(f"Successfully placed {orders_placed} orders")
+            self.positions[security] = position
 
         except Exception as e:
             self.logger.error(f"Error in place_new_orders: {str(e)}")
+
+    def _get_cash_balance(self) -> Decimal:
+        """Get available cash balance"""
+        try:
+            balance = self.market.balances.get(self.maker_id, {}).get('cash', Decimal('0'))
+            return balance
+        except Exception as e:
+            self.logger.error(f"Error getting cash balance: {str(e)}")
+            return Decimal('0')
+
+    def _get_security_balance(self, security: str) -> Decimal:
+        """Get available security balance"""
+        try:
+            balance = self.market.balances.get(self.maker_id, {}).get(security, Decimal('0'))
+            return balance
+        except Exception as e:
+            self.logger.error(f"Error getting security balance: {str(e)}")
+            return Decimal('0')
+
+    def _get_current_price(self, depth: dict, security: str) -> Decimal:
+        """Get current price with fallbacks"""
+        if depth and depth.get('asks') and depth['asks']:
+            return depth['asks'][0]['price']
+        if depth and depth.get('bids') and depth['bids']:
+            return depth['bids'][0]['price']
+        return self.market_stats[security].get('last_price', Decimal('100'))
 
 if __name__ == "__main__":
     # Example usage

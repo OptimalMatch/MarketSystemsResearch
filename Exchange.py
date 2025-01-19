@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime
 import logging
 
+#logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - EXCHANGE - %(message)s')
 
 # Basic structures
 class OrderSide(Enum):
@@ -23,20 +24,25 @@ class Order:
     filled: Decimal
     created_at: datetime
     security_id: str
+    status: str = 'open'  # Add status field
 
     @classmethod
     def create(cls, owner_id: str, side: OrderSide, price: Decimal,
                size: Decimal, security_id: str) -> 'Order':
         return cls(
-            id=str(uuid.uuid4()),
+            id=str(uuid.uuid4()),  # Ensure ID is a string
             owner_id=owner_id,
             side=side,
             price=price,
             size=size,
             filled=Decimal('0'),
             created_at=datetime.now(),
-            security_id=security_id
+            security_id=security_id,
+            status='open'
         )
+
+    def __hash__(self):
+        return hash(str(self.id))  # Make Order hashable based on its ID
 
 
 @dataclass
@@ -63,19 +69,80 @@ class Trade:
         )
 
 
-# Orderbook implementation
+class Exchange:
+    def __init__(self):
+        self.orderbooks = {}
+        self.balances = {}
+        self.order_id_counter = 0
+        self.logger = logging.getLogger(__name__)
+
+    def next_order_id(self) -> str:
+        """Generate next order ID"""
+        self.order_id_counter += 1
+        return f"order_{self.order_id_counter}"
+
+    def place_order(self, owner_id: str, security_id: str, side: OrderSide,
+                    price: Decimal, size: Decimal) -> str:
+        """Place a new order and return the order ID"""
+        if security_id not in self.orderbooks:
+            raise ValueError(f"No orderbook for security {security_id}")
+
+        if not self._validate_balance(owner_id, security_id, side, price, size):
+            raise ValueError("Insufficient balance")
+
+        # Create a new order using the create classmethod
+        order = Order.create(owner_id, side, price, size, security_id)
+
+        # Generate and assign a new order ID
+        order_id = self.next_order_id()
+        order.id = order_id  # Override the UUID with our sequential ID
+
+        # Process the order
+        trades = self.orderbooks[security_id].add_order(order)
+        self._process_trades(trades)
+
+        # Log order placement
+        self.logger.info(f"Placed order {order_id}: {side.value} {size} @ {price}")
+
+        return order_id
+
+    def cancel_order(self, security_id: str, order_id: str) -> bool:
+        """Cancel an existing order"""
+        if security_id not in self.orderbooks:
+            raise ValueError(f"No orderbook for security {security_id}")
+
+        return self.orderbooks[security_id].cancel_order(order_id)
+
+    def get_order_status(self, security_id: str, order_id: str) -> Dict:
+        """Get the status of an order"""
+        if security_id not in self.orderbooks:
+            raise ValueError(f"No orderbook for security {security_id}")
+
+        return self.orderbooks[security_id].get_order_status(order_id)
+
+
+
 class OrderBook:
     def __init__(self, security_id: str):
         self.security_id = security_id
-        self.bids: List[Order] = []  # Buy orders, sorted by price desc
-        self.asks: List[Order] = []  # Sell orders, sorted by price asc
+        self.bids: List[Order] = []
+        self.asks: List[Order] = []
         self.trades: List[Trade] = []
+        self.orders: Dict[str, Order] = {}  # Track orders by ID (string)
 
     def add_order(self, order: Order) -> List[Trade]:
-        """Add order to the book and return any trades that were executed"""
+        """Add an order and return any resulting trades"""
+        # Make sure order.id is a string
+        if not isinstance(order.id, str):
+            raise ValueError("Order ID must be a string")
+
+        # Store order in lookup dictionary
+        self.orders[str(order.id)] = order
+
+        # Match order
         trades = self._match_order(order)
 
-        # If order wasn't fully filled, add to book
+        # If not fully filled, add to book
         remaining_size = order.size - order.filled
         if remaining_size > 0:
             if order.side == OrderSide.BUY:
@@ -84,6 +151,44 @@ class OrderBook:
                 self._add_ask(order)
 
         return trades
+
+    def cancel_order(self, order_id: str) -> bool:
+        """Cancel an order by ID"""
+        if order_id not in self.orders:
+            return False
+
+        order = self.orders[order_id]
+        if order.side == OrderSide.BUY:
+            self.bids = [o for o in self.bids if o.id != order_id]
+        else:
+            self.asks = [o for o in self.asks if o.id != order_id]
+
+        order.status = 'cancelled'
+        return True
+
+    def get_order_status(self, order_id: str) -> Dict:
+        """Get order status"""
+        # Convert order_id to string if it isn't already
+        order_id = str(order_id)
+
+        if order_id not in self.orders:
+            raise ValueError(f"Order {order_id} not found")
+
+        order = self.orders[order_id]
+        return {
+            'id': str(order.id),  # Ensure ID is a string
+            'status': order.status,
+            'filled': order.filled,
+            'remaining': order.size - order.filled
+        }
+
+    def get_market_price(self) -> Optional[Decimal]:
+        """Get current market price based on last trade or best bid/ask"""
+        if self.trades:
+            return self.trades[-1].price
+        elif self.bids and self.asks:
+            return (self.bids[0].price + self.asks[0].price) / 2
+        return None
 
     def _match_order(self, order: Order) -> List[Trade]:
         trades = []
@@ -153,21 +258,130 @@ class OrderBook:
                 break
         self.asks.insert(insert_index, order)
 
-    def cancel_order(self, order_id: str) -> Optional[Order]:
-        """Cancel and remove an order from the book"""
-        for orders in [self.bids, self.asks]:
-            for i, order in enumerate(orders):
-                if order.id == order_id:
-                    return orders.pop(i)
-        return None
+    def cancel_order(self, order_id: str) -> bool:
+        """Cancel an order by ID"""
+        # Convert order_id to string if it isn't already
+        order_id = str(order_id)
 
-    def get_market_price(self) -> Optional[Decimal]:
-        """Get current market price based on last trade or best bid/ask"""
-        if self.trades:
-            return self.trades[-1].price
-        elif self.bids and self.asks:
-            return (self.bids[0].price + self.asks[0].price) / 2
-        return None
+        if order_id not in self.orders:
+            return False
+
+        order = self.orders[order_id]
+        if order.side == OrderSide.BUY:
+            self.bids = [o for o in self.bids if str(o.id) != order_id]
+        else:
+            self.asks = [o for o in self.asks if str(o.id) != order_id]
+
+        order.status = 'cancelled'
+        return True
+
+
+#
+# # Orderbook implementation
+# class OrderBook:
+#     def __init__(self, security_id: str):
+#         self.security_id = security_id
+#         self.bids: List[Order] = []  # Buy orders, sorted by price desc
+#         self.asks: List[Order] = []  # Sell orders, sorted by price asc
+#         self.trades: List[Trade] = []
+#
+#     def add_order(self, order: Order) -> List[Trade]:
+#         """Add order to the book and return any trades that were executed"""
+#         trades = self._match_order(order)
+#
+#         # If order wasn't fully filled, add to book
+#         remaining_size = order.size - order.filled
+#         if remaining_size > 0:
+#             if order.side == OrderSide.BUY:
+#                 self._add_bid(order)
+#             else:
+#                 self._add_ask(order)
+#
+#         return trades
+#
+#     def _match_order(self, order: Order) -> List[Trade]:
+#         trades = []
+#
+#         while True:
+#             match = None
+#             if order.side == OrderSide.BUY:
+#                 # Match against asks (sells)
+#                 if self.asks and self.asks[0].price <= order.price:
+#                     match = self.asks[0]
+#             else:
+#                 # Match against bids (buys)
+#                 if self.bids and self.bids[0].price >= order.price:
+#                     match = self.bids[0]
+#
+#             if not match:
+#                 break
+#
+#             # Calculate trade size
+#             remaining_size = order.size - order.filled
+#             match_remaining = match.size - match.filled
+#             trade_size = min(remaining_size, match_remaining)
+#
+#             # Create and record the trade
+#             trade = Trade.create(
+#                 security_id=self.security_id,
+#                 buyer_id=order.owner_id if order.side == OrderSide.BUY else match.owner_id,
+#                 seller_id=match.owner_id if order.side == OrderSide.BUY else order.owner_id,
+#                 price=match.price,
+#                 size=trade_size
+#             )
+#             trades.append(trade)
+#             self.trades.append(trade)
+#
+#             # Update order fills
+#             order.filled += trade_size
+#             match.filled += trade_size
+#
+#             # Remove matched order if fully filled
+#             if match.filled == match.size:
+#                 if order.side == OrderSide.BUY:
+#                     self.asks.pop(0)
+#                 else:
+#                     self.bids.pop(0)
+#
+#             # Break if original order is fully filled
+#             if order.filled == order.size:
+#                 break
+#
+#         return trades
+#
+#     def _add_bid(self, order: Order):
+#         """Add bid order maintaining price-time priority (highest price first)"""
+#         insert_index = len(self.bids)
+#         for i, bid in enumerate(self.bids):
+#             if order.price > bid.price:
+#                 insert_index = i
+#                 break
+#         self.bids.insert(insert_index, order)
+#
+#     def _add_ask(self, order: Order):
+#         """Add ask order maintaining price-time priority (lowest price first)"""
+#         insert_index = len(self.asks)
+#         for i, ask in enumerate(self.asks):
+#             if order.price < ask.price:
+#                 insert_index = i
+#                 break
+#         self.asks.insert(insert_index, order)
+#
+#     def cancel_order(self, order_id: str) -> Optional[Order]:
+#         """Cancel and remove an order from the book"""
+#         for orders in [self.bids, self.asks]:
+#             for i, order in enumerate(orders):
+#                 if order.id == order_id:
+#                     return orders.pop(i)
+#         return None
+#
+#     def get_market_price(self) -> Optional[Decimal]:
+#         """Get current market price based on last trade or best bid/ask"""
+#         if self.trades:
+#             return self.trades[-1].price
+#         elif self.bids and self.asks:
+#             return (self.bids[0].price + self.asks[0].price) / 2
+#         return None
 
 
 # Market implementation
@@ -185,24 +399,20 @@ class Market:
         return self.orderbooks[security_id]
 
     def place_order(self, owner_id: str, security_id: str, side: OrderSide,
-                    price: Decimal, size: Decimal) -> List[Trade]:
-        """Place a new order in the market"""
-        # Validate security exists
+                    price: Decimal, size: Decimal) -> str:
+        """Place a new order and return the order ID"""
         if security_id not in self.orderbooks:
             raise ValueError(f"No orderbook for security {security_id}")
 
-        # Validate user has sufficient balance
         if not self._validate_balance(owner_id, security_id, side, price, size):
             raise ValueError("Insufficient balance")
 
         # Create and place order
         order = Order.create(owner_id, side, price, size, security_id)
         trades = self.orderbooks[security_id].add_order(order)
-
-        # Process trades and update balances
         self._process_trades(trades)
 
-        return trades
+        return order.id  # Return just the order ID
 
     def _validate_balance(self, owner_id: str, security_id: str,
                           side: OrderSide, price: Decimal, size: Decimal) -> bool:
@@ -294,6 +504,12 @@ class Market:
 
         self.balances[user_id][security_id] = current_balance - amount
 
+    def get_order_status(self, security_id: str, order_id: str) -> Dict:
+        """Get the status of an order"""
+        if security_id not in self.orderbooks:
+            raise ValueError(f"No orderbook for security {security_id}")
+
+        return self.orderbooks[security_id].get_order_status(order_id)
 
 # Example usage
 if __name__ == "__main__":
