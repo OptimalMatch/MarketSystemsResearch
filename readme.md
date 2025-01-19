@@ -254,4 +254,29 @@ stateDiagram-v2
 
 These diagrams provide different views of the system's architecture and behavior.
 
+Market Maker logic flow:
+```mermaid
+flowchart TD
+    A[Start Market Maker] --> B{Get Market Depth}
+    B -->|Depth Available| C[Calculate Mid Price]
+    B -->|No Depth| D[Use Fallback Price]
+    C --> E{Analyze Market Condition}
+    D --> E
+    E -->|Bull Run| F[Increase Sell Size<br>Reduce Buy Size]
+    E -->|Bear Dip| G[Increase Buy Size<br>Reduce Sell Size]
+    E -->|Balanced| H[Use Default Sizes]
+    F --> I[Calculate Spread]
+    G --> I
+    H --> I
+    I --> J[Determine Buy/Sell Prices]
+    J --> K[Check Balances and Position Limits]
+    K -->|Sufficient Balances| L[Place Buy and Sell Orders]
+    K -->|Insufficient Balances| M[Skip Order Placement]
+    L --> N[Update Active Orders and Positions]
+    M --> N
+    N --> O[Wait for Refresh Interval]
+    O --> B
+```
+
+
 All Rights Reserved - Unidatum Integrated Products LLC
