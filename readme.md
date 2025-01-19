@@ -253,3 +253,5 @@ stateDiagram-v2
 ```
 
 These diagrams provide different views of the system's architecture and behavior.
+
+All Rights Reserved - Unidatum Integrated Products LLC
