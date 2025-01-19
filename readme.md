@@ -254,6 +254,8 @@ stateDiagram-v2
 
 These diagrams provide different views of the system's architecture and behavior.
 
+For simulation, below we have the logic flow used when simulating market situations such as a intra-day bull run where we can observe a market maker's effect countering the run.
+
 Market Maker logic flow:
 ```mermaid
 flowchart TD
