@@ -136,6 +136,7 @@ The system is documented with three types of UML diagrams:
 
 These diagrams provide different views of the system's architecture and behavior.
 
+```mermaid
 classDiagram
     class Market {
         -Dict orderbooks
@@ -150,8 +151,7 @@ classDiagram
         -_validate_balance(owner_id, security_id, side, price, size)
         -_process_trades(trades)
     }
-
-```mermaid
+    
     class OrderBook {
         -String security_id
         -List bids
@@ -164,7 +164,7 @@ classDiagram
         -_add_bid(order)
         -_add_ask(order)
     }
-
+    
     class Order {
         +String id
         +String owner_id
@@ -176,7 +176,7 @@ classDiagram
         +String security_id
         +create(owner_id, side, price, size, security_id)
     }
-
+    
     class Trade {
         +String id
         +String security_id
@@ -187,19 +187,17 @@ classDiagram
         +DateTime timestamp
         +create(security_id, buyer_id, seller_id, price, size)
     }
-
+    
     class OrderSide {
         <<enumeration>>
         BUY
         SELL
     }
-
+    
     Market "1" --> "*" OrderBook : contains
     OrderBook "1" --> "*" Order : manages
     OrderBook "1" --> "*" Trade : records
     Order --> "1" OrderSide : has
-
-
 ```
 
 ```mermaid
