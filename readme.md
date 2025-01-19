@@ -278,5 +278,38 @@ flowchart TD
     O --> B
 ```
 
+MarketRushSimulator:
+```mermaid
+flowchart TD
+    A[Start MarketRushSimulator] --> B[Initialize Participants]
+    B --> C[Deposit Cash and Securities]
+    C --> D[Set Wave Patterns and Momentum]
+    D --> E[Begin Simulation Loop]
+    
+    E -->|Within Duration| F[Retrieve Market Depth]
+    F -->|Depth Available| G[Determine Current Price]
+    F -->|No Depth| H[Use Last Trade Price]
+    G --> I[Apply Wave Pattern and Momentum]
+    H --> I
+    
+    I --> J{Aggressive Order?}
+    J -->|Yes| K[Increase Price Increment and Size]
+    J -->|No| L[Use Normal Price Increment and Size]
+    
+    K --> M[Place Aggressive Order]
+    L --> N[Place Normal Order]
+    
+    M --> O[Update Price and Stats]
+    N --> O
+    
+    O -->|End of Wave| P[Move to Next Wave]
+    O -->|Wave Continues| E
+    
+    P --> E
+    
+    E -->|Duration Ends or Stop Signal| Q[Stop Simulation]
+    Q --> R[Shutdown Executors and Threads]
+    R --> S[Log Final Stats and Exit]
+```
 
 All Rights Reserved - Unidatum Integrated Products LLC
