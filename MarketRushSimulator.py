@@ -258,10 +258,10 @@ def run_simulation():
     market.create_orderbook(security_id)
 
     # Create and start market maker
-    #maker_id = 'mm001'
-    #market.deposit(maker_id, 'cash', Decimal('100000000000'))
-    #market.deposit(maker_id, security_id, Decimal('1000000000'))
-    #mm = MarketMaker(market, maker_id, [security_id])
+    maker_id = 'mm001'
+    market.deposit(maker_id, 'cash', Decimal('100000000000'))
+    market.deposit(maker_id, security_id, Decimal('1000000000'))
+    mm = MarketMaker(market, maker_id, [security_id])
 
     # Create rush simulator with sell orders enabled
     rush = MarketRushSimulator(market, security_id, num_participants=10000, enable_simulated_sellers=True)
@@ -274,7 +274,7 @@ def run_simulation():
     try:
         # Start both systems
         print("Starting market maker and rush simulation...")
-        #mm.start()
+        mm.start()
         rush.start_rush(duration_seconds=300)
 
         # Monitor the simulation
@@ -309,10 +309,10 @@ def run_simulation():
             print(f"Order Throughput: {order_throughput:.2f} orders/sec")
             print(f"Trade Throughput: {trade_throughput:.2f} trades/sec")
 
-            #mm_stats = mm.get_market_stats(security_id)
-            #print("\nMarket Maker Stats:")
-            #print(f"Position: {mm_stats['position']}")
-            #print(f"Market Condition: {mm_stats['condition']}")
+            mm_stats = mm.get_market_stats(security_id)
+            print("\nMarket Maker Stats:")
+            print(f"Position: {mm_stats['position']}")
+            print(f"Market Condition: {mm_stats['condition']}")
 
             time.sleep(5)
 
@@ -320,7 +320,7 @@ def run_simulation():
         print("\nStopping simulation...")
     finally:
         rush.stop_rush()
-        #mm.stop()
+        mm.stop()
         print("Simulation ended")
 
 

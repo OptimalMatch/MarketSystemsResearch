@@ -3,3 +3,4 @@ uvicorn
 pydantic
 asyncpg  # for PostgreSQL support
 python-dotenv
+psutil
