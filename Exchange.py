@@ -280,124 +280,19 @@ class OrderBook:
         order.status = 'cancelled'
         return True
 
-
-#
-# # Orderbook implementation
-# class OrderBook:
-#     def __init__(self, security_id: str):
-#         self.security_id = security_id
-#         self.bids: List[Order] = []  # Buy orders, sorted by price desc
-#         self.asks: List[Order] = []  # Sell orders, sorted by price asc
-#         self.trades: List[Trade] = []
-#
-#     def add_order(self, order: Order) -> List[Trade]:
-#         """Add order to the book and return any trades that were executed"""
-#         trades = self._match_order(order)
-#
-#         # If order wasn't fully filled, add to book
-#         remaining_size = order.size - order.filled
-#         if remaining_size > 0:
-#             if order.side == OrderSide.BUY:
-#                 self._add_bid(order)
-#             else:
-#                 self._add_ask(order)
-#
-#         return trades
-#
-#     def _match_order(self, order: Order) -> List[Trade]:
-#         trades = []
-#
-#         while True:
-#             match = None
-#             if order.side == OrderSide.BUY:
-#                 # Match against asks (sells)
-#                 if self.asks and self.asks[0].price <= order.price:
-#                     match = self.asks[0]
-#             else:
-#                 # Match against bids (buys)
-#                 if self.bids and self.bids[0].price >= order.price:
-#                     match = self.bids[0]
-#
-#             if not match:
-#                 break
-#
-#             # Calculate trade size
-#             remaining_size = order.size - order.filled
-#             match_remaining = match.size - match.filled
-#             trade_size = min(remaining_size, match_remaining)
-#
-#             # Create and record the trade
-#             trade = Trade.create(
-#                 security_id=self.security_id,
-#                 buyer_id=order.owner_id if order.side == OrderSide.BUY else match.owner_id,
-#                 seller_id=match.owner_id if order.side == OrderSide.BUY else order.owner_id,
-#                 price=match.price,
-#                 size=trade_size
-#             )
-#             trades.append(trade)
-#             self.trades.append(trade)
-#
-#             # Update order fills
-#             order.filled += trade_size
-#             match.filled += trade_size
-#
-#             # Remove matched order if fully filled
-#             if match.filled == match.size:
-#                 if order.side == OrderSide.BUY:
-#                     self.asks.pop(0)
-#                 else:
-#                     self.bids.pop(0)
-#
-#             # Break if original order is fully filled
-#             if order.filled == order.size:
-#                 break
-#
-#         return trades
-#
-#     def _add_bid(self, order: Order):
-#         """Add bid order maintaining price-time priority (highest price first)"""
-#         insert_index = len(self.bids)
-#         for i, bid in enumerate(self.bids):
-#             if order.price > bid.price:
-#                 insert_index = i
-#                 break
-#         self.bids.insert(insert_index, order)
-#
-#     def _add_ask(self, order: Order):
-#         """Add ask order maintaining price-time priority (lowest price first)"""
-#         insert_index = len(self.asks)
-#         for i, ask in enumerate(self.asks):
-#             if order.price < ask.price:
-#                 insert_index = i
-#                 break
-#         self.asks.insert(insert_index, order)
-#
-#     def cancel_order(self, order_id: str) -> Optional[Order]:
-#         """Cancel and remove an order from the book"""
-#         for orders in [self.bids, self.asks]:
-#             for i, order in enumerate(orders):
-#                 if order.id == order_id:
-#                     return orders.pop(i)
-#         return None
-#
-#     def get_market_price(self) -> Optional[Decimal]:
-#         """Get current market price based on last trade or best bid/ask"""
-#         if self.trades:
-#             return self.trades[-1].price
-#         elif self.bids and self.asks:
-#             return (self.bids[0].price + self.asks[0].price) / 2
-#         return None
-
-
 # Market implementation
 class Market:
-    TRADE_LOG_FILE = Path("trades_log.csv")
 
     def __init__(self):
+        # Dynamically generate the filename with the current timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.TRADE_LOG_FILE = Path(f"trades_log_{timestamp}.csv")
+
         self.orderbooks: Dict[str, OrderBook] = {}
         self.balances: Dict[str, Dict[str, Decimal]] = {}  # user_id -> {security_id -> amount}
         self.trade_count = 0  # Initialize trade counter
         self.logger = logging.getLogger(__name__)
+
 
     def create_orderbook(self, security_id: str) -> OrderBook:
         """Create a new orderbook for a security"""
@@ -481,7 +376,7 @@ class Market:
             # Optionally log trade details
             logging.info(f"Trade: {trade}")
 
-            # Log the trade to the file
+            #Log the trade to the file
             with self.TRADE_LOG_FILE.open('a', newline='') as file:
                 writer = csv.writer(file)
                 writer.writerow([
