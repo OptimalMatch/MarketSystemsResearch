@@ -11,12 +11,20 @@ import signal
 import sys
 from Exchange import Market, OrderSide
 from MarketMaker import MarketMaker
+import psutil
+
+def get_memory_usage():
+    """Return memory usage in MB."""
+    process = psutil.Process()
+    mem_info = process.memory_info()
+    return mem_info.rss / 1024 / 1024  # Convert bytes to MB
 
 class MarketRushSimulator:
-    def __init__(self, market: Market, security_id: str, num_participants: int = 10000):
+    def __init__(self, market: Market, security_id: str, num_participants: int = 10000, enable_simulated_sellers: bool = True):
         self.market = market
         self.security_id = security_id
         self.num_participants = num_participants
+        self.enable_simulated_sellers = enable_simulated_sellers  # New flag
         self.is_running = False
         self.thread = None
         self.logger = logging.getLogger(__name__)
@@ -155,62 +163,52 @@ class MarketRushSimulator:
             return False
 
         try:
+            # Randomly select a participant
             participant = random.choice(self.participants)
 
             # Get current market depth
             depth = self.market.get_market_depth(self.security_id)
+            current_price = self.last_trade_price
             if depth['asks']:
                 current_price = depth['asks'][0]['price']
-            else:
-                current_price = self.last_trade_price
+            elif depth['bids']:
+                current_price = depth['bids'][0]['price']
 
-            # Apply controlled momentum - convert to Decimal
+            # Apply momentum
             self.momentum += self.momentum_increment
             self.momentum = min(max(self.momentum, self.min_momentum), self.max_momentum)
 
-            # Determine if this should be an aggressive order
-            is_aggressive = random.random() < float(self.aggressive_order_probability)
+            # Randomly decide whether this is a buy or sell order
+            is_sell_order = random.random() < 0.5
 
-            # Calculate price increment using Decimal throughout
+            # Calculate overlapping price increment
             wave_orders, wave_multiplier = self.wave_patterns[self.current_wave]
             base_increment = Decimal(str(random.uniform(
                 float(self.min_price_increment),
                 float(self.max_price_increment)
             )))
+            wave_multiplier = Decimal(str(wave_multiplier))
+            price_increment = base_increment * wave_multiplier * self.momentum
 
-            wave_multiplier = Decimal(str(wave_multiplier))  # Convert to Decimal
+            # Allow overlapping price ranges
+            overlap_factor = Decimal('0.5')  # 50% chance for overlap
+            if random.random() < overlap_factor:
+                price_increment *= Decimal('-1')  # Reverse direction for overlap
 
-            # Calculate controlled price increment
-            if is_aggressive:
-                price_increment = base_increment * wave_multiplier * self.momentum
-            else:
-                price_increment = base_increment * wave_multiplier
-
-            # Ensure reasonable price movement
-            max_increment = current_price * Decimal('0.01')  # Max 1% move per order
-            price_increment = min(price_increment, max_increment)
-
-            # Calculate buy price
-            buy_price = current_price + price_increment
-
-            # Calculate reasonable size - convert to Decimal
-            if is_aggressive:
-                size = Decimal(str(random.randint(
-                    int(float(self.order_size_max)) // 2,
-                    int(float(self.order_size_max))
-                )))
-            else:
-                size = Decimal(str(random.randint(
-                    int(float(self.order_size_min)),
-                    int(float(self.order_size_max)) // 2
-                )))
+            # Calculate price and size
+            price = current_price + price_increment
+            size = Decimal(str(random.randint(
+                int(float(self.order_size_min)),
+                int(float(self.order_size_max))
+            )))
 
             # Place the order
+            side = OrderSide.SELL if is_sell_order else OrderSide.BUY
             self.market.place_order(
                 owner_id=participant,
                 security_id=self.security_id,
-                side=OrderSide.BUY,
-                price=buy_price,
+                side=side,
+                price=price,
                 size=size
             )
 
@@ -221,13 +219,12 @@ class MarketRushSimulator:
                 self.orders_in_current_wave = 0
 
             # Update stats
-            self.stats['current_price'] = buy_price
-            self.stats['highest_price'] = max(self.stats['highest_price'], buy_price)
             self.stats['volume'] += size
-
+            self.stats['current_price'] = price
+            self.stats['highest_price'] = max(self.stats['highest_price'], price)
             if self.stats['start_price'] > 0:
                 self.stats['price_movement_percent'] = (
-                        (buy_price - self.stats['start_price']) /
+                        (self.stats['current_price'] - self.stats['start_price']) /
                         self.stats['start_price'] * Decimal('100')
                 )
 
@@ -261,23 +258,42 @@ def run_simulation():
     market.create_orderbook(security_id)
 
     # Create and start market maker
-    maker_id = 'mm001'
-    market.deposit(maker_id, 'cash', Decimal('100000000000'))
-    market.deposit(maker_id, security_id, Decimal('1000000000'))
-    mm = MarketMaker(market, maker_id, [security_id])
+    #maker_id = 'mm001'
+    #market.deposit(maker_id, 'cash', Decimal('100000000000'))
+    #market.deposit(maker_id, security_id, Decimal('1000000000'))
+    #mm = MarketMaker(market, maker_id, [security_id])
 
-    # Create rush simulator
-    rush = MarketRushSimulator(market, security_id, num_participants=10000)
+    # Create rush simulator with sell orders enabled
+    rush = MarketRushSimulator(market, security_id, num_participants=10000, enable_simulated_sellers=True)
+
+    # To disable sell orders, set enable_simulated_sellers to False
+    # rush = MarketRushSimulator(market, security_id, num_participants=10000, enable_simulated_sellers=False)
+
+    start_time = time.time()  # Start timer
 
     try:
         # Start both systems
         print("Starting market maker and rush simulation...")
-        mm.start()
+        #mm.start()
         rush.start_rush(duration_seconds=300)
 
         # Monitor the simulation
         while rush.is_running:
+            elapsed_time = time.time() - start_time
+
+            # Gather stats
             stats = rush.get_stats()
+            orders_processed = stats['total_orders']
+            trades_executed = market.get_trade_count()
+
+            # Calculate throughput
+            order_throughput = orders_processed / elapsed_time if elapsed_time > 0 else 0
+            trade_throughput = trades_executed / elapsed_time if elapsed_time > 0 else 0
+
+            # Get memory usage
+            memory_usage = get_memory_usage()
+
+            # Display stats
             print("\nRush Statistics:")
             print(f"Total Orders: {stats['total_orders']}")
             print(f"Successful Orders: {stats['successful_orders']}")
@@ -285,11 +301,18 @@ def run_simulation():
             print(f"Current Price: {stats['current_price']}")
             print(f"Price Movement: {stats['price_movement_percent']:.2f}%")
             print(f"Volume: {stats['volume']}")
+            print(f"Total Trades: {trades_executed}")
 
-            mm_stats = mm.get_market_stats(security_id)
-            print("\nMarket Maker Stats:")
-            print(f"Position: {mm_stats['position']}")
-            print(f"Market Condition: {mm_stats['condition']}")
+            # Display performance metrics
+            print("\nPerformance Metrics:")
+            print(f"Memory Usage: {memory_usage:.2f} MB")
+            print(f"Order Throughput: {order_throughput:.2f} orders/sec")
+            print(f"Trade Throughput: {trade_throughput:.2f} trades/sec")
+
+            #mm_stats = mm.get_market_stats(security_id)
+            #print("\nMarket Maker Stats:")
+            #print(f"Position: {mm_stats['position']}")
+            #print(f"Market Condition: {mm_stats['condition']}")
 
             time.sleep(5)
 
@@ -297,7 +320,7 @@ def run_simulation():
         print("\nStopping simulation...")
     finally:
         rush.stop_rush()
-        mm.stop()
+        #mm.stop()
         print("Simulation ended")
 
 

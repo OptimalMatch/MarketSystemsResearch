@@ -5,6 +5,8 @@ from decimal import Decimal
 import uuid
 from datetime import datetime
 import logging
+import csv
+from pathlib import Path
 
 #logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - EXCHANGE - %(message)s')
 
@@ -192,6 +194,7 @@ class OrderBook:
 
     def _match_order(self, order: Order) -> List[Trade]:
         trades = []
+        logging.debug(f"Matching order: {order}")
 
         while True:
             match = None
@@ -205,6 +208,7 @@ class OrderBook:
                     match = self.bids[0]
 
             if not match:
+                logging.debug(f"No match found for order: {order}")
                 break
 
             # Calculate trade size
@@ -222,6 +226,7 @@ class OrderBook:
             )
             trades.append(trade)
             self.trades.append(trade)
+            logging.debug(f"Trade executed: {trade}")
 
             # Update order fills
             order.filled += trade_size
@@ -386,9 +391,12 @@ class OrderBook:
 
 # Market implementation
 class Market:
+    TRADE_LOG_FILE = Path("trades_log.csv")
+
     def __init__(self):
         self.orderbooks: Dict[str, OrderBook] = {}
         self.balances: Dict[str, Dict[str, Decimal]] = {}  # user_id -> {security_id -> amount}
+        self.trade_count = 0  # Initialize trade counter
         self.logger = logging.getLogger(__name__)
 
     def create_orderbook(self, security_id: str) -> OrderBook:
@@ -401,6 +409,7 @@ class Market:
     def place_order(self, owner_id: str, security_id: str, side: OrderSide,
                     price: Decimal, size: Decimal) -> str:
         """Place a new order and return the order ID"""
+        logging.debug(f"Placing order - Owner: {owner_id}, Side: {side}, Price: {price}, Size: {size}")
         if security_id not in self.orderbooks:
             raise ValueError(f"No orderbook for security {security_id}")
 
@@ -434,6 +443,13 @@ class Market:
 
     def _process_trades(self, trades: List[Trade]):
         """Process trades and update user balances"""
+
+        # Ensure the trade log file exists with headers
+        if not self.TRADE_LOG_FILE.exists():
+            with self.TRADE_LOG_FILE.open('w', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow(["Trade ID", "Security ID", "Buyer ID", "Seller ID", "Price", "Size", "Timestamp"])
+
         for trade in trades:
             # Update buyer balances
             if trade.buyer_id not in self.balances:
@@ -457,6 +473,26 @@ class Market:
 
             # Deduct security from seller
             seller_balances[trade.security_id] = seller_balances.get(trade.security_id, Decimal('0')) - trade.size
+
+            # Increment trade count
+            self.trade_count += 1
+            logging.debug(f"Trade executed. Total trades: {self.trade_count}")
+
+            # Optionally log trade details
+            logging.info(f"Trade: {trade}")
+
+            # Log the trade to the file
+            with self.TRADE_LOG_FILE.open('a', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow([
+                    trade.id,
+                    trade.security_id,
+                    trade.buyer_id,
+                    trade.seller_id,
+                    f"{trade.price:.2f}",
+                    f"{trade.size:.2f}",
+                    trade.timestamp.isoformat()
+                ])
 
     def cancel_order(self, security_id: str, order_id: str) -> Optional[Order]:
         """Cancel an order in the market"""
@@ -510,6 +546,10 @@ class Market:
             raise ValueError(f"No orderbook for security {security_id}")
 
         return self.orderbooks[security_id].get_order_status(order_id)
+
+    def get_trade_count(self) -> int:
+        """Get the total number of executed trades."""
+        return self.trade_count
 
 # Example usage
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ import logging
 import statistics
 from Exchange import Market, OrderSide
 
-#logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - MARKETMAKER - %(message)s')
+#logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - MARKETMAKER - %(message)s')
 
 class MarketCondition(Enum):
     BALANCED = "balanced"
@@ -254,7 +254,7 @@ class MarketMaker:
                 'buy_sizes': buy_sizes,
                 'sell_sizes': sell_sizes
             }
-            logging.debug(f"Order parameters for {security}: {params}")
+            logging.info(f"Order parameters for {security}: {params}")
             return params
 
         except Exception as e:
@@ -357,7 +357,7 @@ class MarketMaker:
         try:
             cash_balance = self._get_cash_balance()
             security_balance = self._get_security_balance(security)
-            logging.debug(f"Balances - Cash: {cash_balance}, Security: {security_balance}")
+            logging.info(f"{self.maker_id} Balances - Cash: {cash_balance}, Security: {security_balance}")
 
             if cash_balance <= 0 or security_balance <= 0:
                 self.logger.warning(f"Insufficient balances. Cash: {cash_balance}, Security: {security_balance}")
@@ -371,7 +371,7 @@ class MarketMaker:
             depth = self.market.get_market_depth(security)
             current_price = self._get_current_price(depth, security)
 
-            self.logger.info(f"\nPlacing orders for {security}:")
+            self.logger.info(f"\n{self.maker_id} Placing orders for {security}:")
             self.logger.info(f"Current price: {current_price}")
             self.logger.info(f"Current position: {position}")
 
