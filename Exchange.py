@@ -340,10 +340,10 @@ class Market:
         """Process trades and update user balances"""
 
         # Ensure the trade log file exists with headers
-        if not self.TRADE_LOG_FILE.exists():
-            with self.TRADE_LOG_FILE.open('w', newline='') as file:
-                writer = csv.writer(file)
-                writer.writerow(["Trade ID", "Security ID", "Buyer ID", "Seller ID", "Price", "Size", "Timestamp"])
+        # if not self.TRADE_LOG_FILE.exists():
+        #     with self.TRADE_LOG_FILE.open('w', newline='') as file:
+        #         writer = csv.writer(file)
+        #         writer.writerow(["Trade ID", "Security ID", "Buyer ID", "Seller ID", "Price", "Size", "Timestamp"])
 
         for trade in trades:
             # Update buyer balances
@@ -377,17 +377,17 @@ class Market:
             logging.info(f"Trade: {trade}")
 
             #Log the trade to the file
-            with self.TRADE_LOG_FILE.open('a', newline='') as file:
-                writer = csv.writer(file)
-                writer.writerow([
-                    trade.id,
-                    trade.security_id,
-                    trade.buyer_id,
-                    trade.seller_id,
-                    f"{trade.price:.2f}",
-                    f"{trade.size:.2f}",
-                    trade.timestamp.isoformat()
-                ])
+            # with self.TRADE_LOG_FILE.open('a', newline='') as file:
+            #     writer = csv.writer(file)
+            #     writer.writerow([
+            #         trade.id,
+            #         trade.security_id,
+            #         trade.buyer_id,
+            #         trade.seller_id,
+            #         f"{trade.price:.2f}",
+            #         f"{trade.size:.2f}",
+            #         trade.timestamp.isoformat()
+            #     ])
 
     def cancel_order(self, security_id: str, order_id: str) -> Optional[Order]:
         """Cancel an order in the market"""
