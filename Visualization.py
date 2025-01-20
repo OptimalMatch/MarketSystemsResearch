@@ -37,7 +37,7 @@ class Visualization:
             for marker in self.markers:
                 emit("market_maker_marker", marker)
 
-    def start_server(self, port=6000):
+    def start_server(self, port=8084):
         """Start the Flask server in a separate thread."""
         self.server_thread = threading.Thread(
             target=lambda: self.socketio.run(self.app, host="127.0.0.1", port=port, debug=False)
