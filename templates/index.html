@@ -137,13 +137,13 @@
 
         // Listen for candlestick updates
         socket.on('candlestick', (data) => {
-            console.log('Candlestick data received:', data); // Debug log
+            //console.log('Candlestick data received:', data); // Debug log
             candlestickSeries.setData(data);
         });
 
         // Listen for band (SMA) updates
         socket.on('band', (data) => {
-            console.log('Band data received:', data); // Debug log
+            //console.log('Band data received:', data); // Debug log
             bandsSeries.setData(data);
         });
 
@@ -157,6 +157,21 @@
                 <ul>${data.asks.map(order => `<li>${order.price} @ ${order.size}</li>`).join('')}</ul>
             `;
         });
+
+        // Maintain a local array of markers
+        const markers = [];
+
+        // Listen for new markers from the server
+        socket.on('market_maker_marker', (marker) => {
+            //console.log('Received marker:', marker);
+
+            // Add the new marker to the local array
+            markers.push(marker);
+
+            // Update the markers on the chart
+            candlestickSeries.setMarkers(markers);
+        });
+
     </script>
 </body>
 </html>

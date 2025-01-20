@@ -26,6 +26,8 @@ def run_simulation_with_visualization():
     # Initialize visualization
     visualization = Visualization(market)
 
+    market.set_visualization(visualization)
+
     try:
         # Start the visualization server
         visualization.start_server(port=5000)

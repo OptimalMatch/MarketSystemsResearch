@@ -76,7 +76,10 @@ class Exchange:
         self.orderbooks = {}
         self.balances = {}
         self.order_id_counter = 0
+
         self.logger = logging.getLogger(__name__)
+
+
 
     def next_order_id(self) -> str:
         """Generate next order ID"""
@@ -291,7 +294,11 @@ class Market:
         self.balances: Dict[str, Dict[str, Decimal]] = {}  # user_id -> {security_id -> amount}
         self.trade_count = 0  # Initialize trade counter
         self.logger = logging.getLogger(__name__)
+        self.visualization = None  # Add reference to Visualization
 
+    def set_visualization(self, visualization):
+        """Set the visualization instance."""
+        self.visualization = visualization
 
     def create_orderbook(self, security_id: str) -> OrderBook:
         """Create a new orderbook for a security"""
@@ -374,6 +381,22 @@ class Market:
 
             # Optionally log trade details
             logging.info(f"Trade: {trade}")
+
+            # Emit marker if market maker is involved
+            if self.visualization and (trade.buyer_id == 'mm001' or trade.seller_id == 'mm001'):
+                marker = {
+                    'time': int(trade.timestamp.timestamp()),  # Convert to Unix timestamp
+                    'position': 'belowBar' if trade.buyer_id == 'mm001' else 'aboveBar',
+                    'color': '#2196F3' if trade.buyer_id == 'mm001' else '#e91e63',
+                    'shape': 'arrowUp' if trade.buyer_id == 'mm001' else 'arrowDown',
+                    'text': f"{'BUY' if trade.buyer_id == 'mm001' else 'SELL'} @ {trade.price:.2f}",
+                    'price': float(trade.price),  # Include trade price for detailed info
+                    'size': float(trade.size),  # Include trade size for context
+                    'security_id': trade.security_id,  # Include the traded security
+                    'buyer_id': trade.buyer_id,  # Identify the buyer
+                    'seller_id': trade.seller_id  # Identify the seller
+                }
+                self.visualization.emit_market_maker_trade(marker)
 
             # Add to the batch buffer
             self.trade_buffer.append([

@@ -11,6 +11,7 @@ class Visualization:
         self.orderbook_data = {"bids": [], "asks": []}
         self.candlestick_data = []
         self.band_data = []  # Store SMA data for bands
+        self.markers = []  # To store emitted markers
         self.app = Flask(__name__)
         self.socketio = SocketIO(self.app)
         self.server_thread = None
@@ -29,6 +30,9 @@ class Visualization:
             """Send initial data to the client when connected."""
             emit("orderbook", self.orderbook_data)
             emit("candlestick", self.candlestick_data)
+            # Send stored markers to the client
+            for marker in self.markers:
+                emit("market_maker_marker", marker)
 
     def start_server(self, port=5000):
         """Start the Flask server in a separate thread."""
@@ -95,6 +99,29 @@ class Visualization:
                 })
             self.band_data = sma_values
             self.socketio.emit("band", self.band_data)
+
+    def emit_market_maker_trade(self, marker):
+        """Emit a market maker trade as a marker for the chart."""
+        # Store the marker for future reference
+        self.markers.append(marker)
+
+        #print(f"Added {marker}")
+
+        # Emit the marker via socket.io
+        self.socketio.emit('market_maker_marker', {
+            'time': marker['time'],  # Timestamp
+            'position': marker['position'],  # Position on the chart
+            'color': marker['color'],  # Color for the marker
+            'shape': marker['shape'],  # Shape of the marker
+            'text': marker['text'],  # Text to display
+            'details': {  # Additional details for contextual information
+                'price': marker['price'],
+                'size': marker['size'],
+                'security_id': marker['security_id'],
+                'buyer_id': marker['buyer_id'],
+                'seller_id': marker['seller_id']
+            }
+        })
 
     def run_visualization(self):
         """Run continuous updates for visualization."""
