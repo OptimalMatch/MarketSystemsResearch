@@ -5,55 +5,103 @@
     <title>Trading Visualization</title>
     <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script src="https://code.highcharts.com/highcharts.js"></script>
+    <script src="https://code.highcharts.com/modules/accessibility.js"></script>
     <style>
-        #candlestick-chart, #bands-chart {
+    @media (prefers-color-scheme: dark) {
+        #candlestick-chart, #bands-chart, #trade-chart {
             width: 100%;
             height: 400px;
+
         }
         #orderbook {
             width: 100%;
             height: 500px;
             overflow: auto;
         }
+        .row {
+          display: flex;
+        }
 
+        .column {
+          flex: 50%;
+        }
 
+        body {
+            background-color: black;
+            color: white;
+        }
+
+        #orderbookbids {
+            color: #18a856;
+            font-family: sans-serif;
+        }
+
+        #orderbookasks {
+            color: #a86e18;
+            font-family: sans-serif;
+        }
+
+        .title {
+            font-family: Courier, monospace;
+        }
+    }
     </style>
 </head>
 <body>
-    <h2>Candlestick Chart</h2>
-    <div id="candlestick-chart"></div>
-    <div id="candlestick-legend" style="
-        position: absolute;
-        top: 70px;
-        left: 10px;
-        z-index: 1;
-        font-size: 24px;
-        font-family: sans-serif;
-        line-height: 28px;
-        font-weight: 300;
-        background: rgba(255, 255, 255, 0.8); /* Add transparency */
-        padding: 5px;
-        border-radius: 5px;
-        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-    ">
-        <strong>Open:</strong> <span id="open-value">-</span><br/>
-        <strong>High:</strong> <span id="high-value">-</span><br/>
-        <strong>Low:</strong> <span id="low-value">-</span><br/>
-        <strong>Close:</strong> <span id="close-value">-</span>
+    <div class="row">
+        <div class="column">
+            <h2 class="title">Depth of Market Chart</h2>
+            <div id="dom-container" style="height: 400px; width: 1000px; margin: 1rem 0;"></div>
+        </div>
+        <div class="column">
+            <h2 class="title">Order Book</h2>
+            <div id="orderbook"></div>
+        </div>
+    </div>
+    <div class="row">
+        <div class="column">
+            <h2 class="title">Candlestick Chart</h2>
+            <div id="candlestick-chart"></div>
+            <div id="candlestick-legend" style="
+                position: absolute;
+                top: 660px;
+                left: 10px;
+                z-index: 1;
+                font-size: 24px;
+                font-family: sans-serif;
+                line-height: 28px;
+                font-weight: 300;
+                background: rgba(73, 73, 74, 0.8); /* Add transparency */
+                padding: 5px;
+                border-radius: 5px;
+                box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            ">
+                <strong>Open:</strong> <span id="open-value">-</span><br/>
+                <strong>High:</strong> <span id="high-value">-</span><br/>
+                <strong>Low:</strong> <span id="low-value">-</span><br/>
+                <strong>Close:</strong> <span id="close-value">-</span>
+            </div>
+        </div>
+        <div class="column">
+            <h2 class="title">Volume of Trades Chart</h2>
+            <div id="trade-chart"></div>
+        </div>
     </div>
 
-    <h2>Moving Averages (Bands)</h2>
+
+    <h2 class="title">Moving Averages (Bands)</h2>
     <div id="bands-chart"></div>
     <div id="bands-legend" style="
         position: absolute;
-        top: 580px;
+        top: 1120px;
         left: 10px;
         z-index: 1;
         font-size: 24px;
         font-family: sans-serif;
         line-height: 28px;
         font-weight: 300;
-        background: rgba(255, 255, 255, 0.8); /* Add transparency */
+        background: rgba(73, 73, 74, 0.8); /* Add transparency */
         padding: 5px;
         border-radius: 5px;
         box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
@@ -62,14 +110,75 @@
         <strong>SMA:</strong> <span id="sma-value">-</span>
     </div>
 
-    <h2>Order Book</h2>
-    <div id="orderbook"></div>
+
 
     <script>
         const socket = io();
 
+        // Trade chart
+        const tradeChart = LightweightCharts.createChart(document.getElementById('trade-chart'), {
+            width: 800,
+            height: 400,
+            timeScale: {
+                timeVisible: true,
+                secondsVisible: true, // Show seconds if timestamps have small intervals
+            },
+            layout: { textColor: 'white', background: { type: 'solid', color: 'black' } }
+        });
+        const tradeSeries = tradeChart.addHistogramSeries({
+            color: '#26a69a',
+            priceFormat: {
+                type: 'volume',
+            },
+            scaleMargins: {
+                top: 0.8,
+                bottom: 0,
+            }
+        });
+
+        // Listen for aggregated trades and update the chart
+        const aggregatedTradeData = [];
+
+        socket.on('aggregated_trade', (aggregatedTrade) => {
+            //console.log('Received aggregated trade:', aggregatedTrade);
+
+            // Validate data
+            if (!aggregatedTrade.time || !aggregatedTrade.total_volume) {
+                console.warn('Invalid trade data:', aggregatedTrade);
+                return;
+            }
+
+            // Find existing entry for the same time
+            const existingIndex = aggregatedTradeData.findIndex((data) => data.time === aggregatedTrade.time);
+
+            if (existingIndex !== -1) {
+                // Update existing entry
+                aggregatedTradeData[existingIndex].value += aggregatedTrade.total_volume;
+            } else {
+                // Add new entry
+                aggregatedTradeData.push({
+                    time: aggregatedTrade.time,
+                    value: aggregatedTrade.total_volume,
+                });
+            }
+
+            // Sort the data by time to ensure chart updates correctly
+            aggregatedTradeData.sort((a, b) => a.time - b.time);
+
+            // Update the chart
+            tradeSeries.setData(aggregatedTradeData);
+        });
+
         // Candlestick chart
-        const candlestickChart = LightweightCharts.createChart(document.getElementById('candlestick-chart'), { width: 800, height: 400 });
+        const candlestickChart = LightweightCharts.createChart(document.getElementById('candlestick-chart'), {
+            width: 800,
+            height: 400,
+            timeScale: {
+                timeVisible: true,
+                secondsVisible: true, // Show seconds if timestamps have small intervals
+            },
+            layout: { textColor: 'white', background: { type: 'solid', color: 'black' } }
+        });
         const candlestickSeries = candlestickChart.addCandlestickSeries();
 
         // Legend for candlestick chart
@@ -109,8 +218,9 @@
                 timeVisible: true,
                 secondsVisible: true, // Show seconds if timestamps have small intervals
             },
+            layout: { textColor: 'white', background: { type: 'solid', color: 'black' } }
         });
-        const bandsSeries = bandsChart.addLineSeries({ color: 'blue', lineWidth: 2 });
+        const bandsSeries = bandsChart.addLineSeries({ color: '#a81871', lineWidth: 2 });
 
         // Legend for bands chart
         const bandTime = document.getElementById('band-time');
@@ -134,6 +244,35 @@
             smaValue.textContent = '-';
         });
 
+        function convertUnixToDate(unixTime) {
+            const date = new Date(unixTime * 1000); // Convert seconds to milliseconds
+            return {
+                year: date.getUTCFullYear(),
+                month: date.getUTCMonth() + 1, // Months are 0-indexed
+                day: date.getUTCDate(),
+            };
+        }
+
+        // Maintain a Set to track unique times
+        //const uniqueCandlestickTimes = new Set();
+
+<!--        socket.on("candlestick", (candlestickData) => {-->
+
+<!--            // Filter out duplicate candlesticks based on their `time`-->
+<!--            const filteredData = candlestickData.filter((candle) => {-->
+<!--                if (uniqueCandlestickTimes.has(candle.time)) {-->
+<!--                    return false; // Skip duplicates-->
+<!--                }-->
+<!--                uniqueCandlestickTimes.add(candle.time);-->
+<!--                return true;-->
+<!--            });-->
+
+<!--            // Update the chart with the filtered data-->
+<!--            if (filteredData.length > 0) {-->
+<!--                console.log('Candlestick data received:', filteredData); // Debug log-->
+<!--                candlestickSeries.update(filteredData);-->
+<!--            }-->
+<!--        });-->
 
         // Listen for candlestick updates
         socket.on('candlestick', (data) => {
@@ -152,9 +291,9 @@
             const orderbookDiv = document.getElementById('orderbook');
             orderbookDiv.innerHTML = `
                 <h3>Bids</h3>
-                <ul>${data.bids.map(order => `<li>${order.price} @ ${order.size}</li>`).join('')}</ul>
+                <ul id="orderbookbids">${data.bids.map(order => `<li>${order.price} @ ${order.size}</li>`).join('')}</ul>
                 <h3>Asks</h3>
-                <ul>${data.asks.map(order => `<li>${order.price} @ ${order.size}</li>`).join('')}</ul>
+                <ul id="orderbookasks">${data.asks.map(order => `<li>${order.price} @ ${order.size}</li>`).join('')}</ul>
             `;
         });
 
@@ -171,6 +310,155 @@
             // Update the markers on the chart
             candlestickSeries.setMarkers(markers);
         });
+
+
+
+        let domChart = Highcharts.chart('dom-container', {
+            chart: {
+                type: 'area',
+                zooming: {
+                    type: 'xy'
+                },
+                backgroundColor: 'black', // Set background color to black
+            },
+            title: {
+                text: 'Depth of Market',
+                style: {
+                    color: 'white' // Set title text color to white
+                }
+            },
+            xAxis: {
+                minPadding: 0,
+                maxPadding: 0,
+                title: {
+                    text: 'Price',
+                    style: {
+                        color: 'white' // Set x-axis title text color
+                    }
+                },
+                labels: {
+                    style: {
+                        color: 'white' // Set x-axis label text color
+                    }
+                },
+                plotLines: [{
+                    color: 'white',
+                    value: 102, // Initial actual price
+                    width: 1,
+                    id: 'actualPriceLine', // Add an ID to the plot line for dynamic updates
+                    label: {
+                        text: 'Actual price',
+                        rotation: 90,
+                        style: {
+                            color: 'white'
+                        }
+                    }
+                }],
+            },
+            yAxis: [{
+                lineWidth: 1,
+                gridLineWidth: 1,
+                title: null,
+                tickWidth: 1,
+                tickLength: 5,
+                tickPosition: 'inside',
+                labels: {
+                    align: 'left',
+                    x: 8
+                }
+            }, {
+                opposite: true,
+                linkedTo: 0,
+                lineWidth: 1,
+                gridLineWidth: 0,
+                title: null,
+                tickWidth: 1,
+                tickLength: 5,
+                tickPosition: 'inside',
+                labels: {
+                    align: 'right',
+                    x: -8,
+                    style: {
+                        color: 'white' // Set y-axis label text color
+                    }
+                }
+            }],
+            legend: {
+                enabled: false
+            },
+            plotOptions: {
+                area: {
+                    fillOpacity: 0.2,
+                    lineWidth: 1,
+                    step: 'center'
+                }
+            },
+            tooltip: {
+                backgroundColor: 'gray', // Set tooltip background to gray
+                headerFormat: '<span style="font-size=10px; color:white;">Price: {point.key}</span><br/>',
+                valueDecimals: 2,
+                style: {
+                    color: 'white' // Set tooltip text color to white
+                }
+            },
+            series: [{
+                name: 'Bids',
+                data: [],
+                color: '#03a7a8'
+            }, {
+                name: 'Asks',
+                data: [],
+                color: '#fc5857'
+            }]
+        });
+
+        // Listen for depth-of-market data from the server
+        socket.on('depth_of_market', (domData) => {
+            if (domData && domData.bids && domData.asks) {
+                // Sort bids in ascending order by price (X-axis)
+                const sortedBids = domData.bids.sort((a, b) => a[0] - b[0]);
+
+                // Sort asks in ascending order by price (X-axis)
+                const sortedAsks = domData.asks.sort((a, b) => a[0] - b[0]);
+
+                // Update bids and asks on the chart
+                domChart.series[0].setData(sortedBids, true); // Update bids
+                domChart.series[1].setData(sortedAsks, true); // Update asks
+
+                // Extract the actual price from domData
+                const actualPrice = domData.actualPrice || getMidPrice(sortedBids, sortedAsks);
+
+                // Update the actual price plot line dynamically
+                if (actualPrice !== undefined) {
+                    domChart.xAxis[0].update({
+                        plotLines: [{
+                            id: 'actualPriceLine', // Match the ID of the existing plot line
+                            color: 'white',
+                            value: actualPrice, // Set the new price dynamically
+                            width: 1,
+                            label: {
+                                text: `Actual price: ${actualPrice.toFixed(2)}`,
+                                rotation: 90,
+                                style: {
+                                    color: 'white'
+                                }
+                            }
+                        }]
+                    });
+                }
+            }
+        });
+
+        // Helper function to calculate the mid-price (if not provided in domData)
+        function getMidPrice(bids, asks) {
+            if (bids.length > 0 && asks.length > 0) {
+                const bestBid = bids[bids.length - 1][0]; // Last bid price
+                const bestAsk = asks[0][0]; // First ask price
+                return (bestBid + bestAsk) / 2; // Calculate the mid-price
+            }
+            return undefined;
+        }
+
 
     </script>
 </body>

@@ -7,6 +7,7 @@ from datetime import datetime
 import logging
 import csv
 from pathlib import Path
+from collections import defaultdict
 
 #logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - EXCHANGE - %(message)s')
 
@@ -284,8 +285,11 @@ class OrderBook:
 class Market:
 
     def __init__(self):
-        # Initialize batch buffer for trades
-        self.trade_buffer = []
+        # Initialize trade buffer for aggregation
+        self.trade_aggregation_buffer = defaultdict(
+            lambda: {"total_volume": Decimal('0'), "total_price": Decimal('0'), "count": 0})
+        self.last_aggregation_time = datetime.now().timestamp()
+
         # Dynamically generate the filename with the current timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.TRADE_LOG_FILE = Path(f"trades_log_{timestamp}.csv")
@@ -293,6 +297,7 @@ class Market:
         self.orderbooks: Dict[str, OrderBook] = {}
         self.balances: Dict[str, Dict[str, Decimal]] = {}  # user_id -> {security_id -> amount}
         self.trade_count = 0  # Initialize trade counter
+        self.trade_buffer = []
         self.logger = logging.getLogger(__name__)
         self.visualization = None  # Add reference to Visualization
 
@@ -351,7 +356,29 @@ class Market:
         #         writer = csv.writer(file)
         #         writer.writerow(["Trade ID", "Security ID", "Buyer ID", "Seller ID", "Price", "Size", "Timestamp"])
 
+        trade_aggregator = defaultdict(
+            lambda: {"time": None, "total_volume": Decimal('0'), "total_price": Decimal('0'), "count": 0})
+
         for trade in trades:
+            rounded_time = int(trade.timestamp.timestamp())  # Round to nearest second
+            # Aggregate trades into the buffer
+            aggregated_data = self.trade_aggregation_buffer[rounded_time]
+            aggregated_data["total_volume"] += trade.size
+            aggregated_data["total_price"] += trade.price * trade.size
+            aggregated_data["count"] += 1
+
+
+
+            # Emit individual trades
+            # if self.visualization:
+            #     self.visualization.emit_trade({
+            #         "time": rounded_time,
+            #         "price": float(trade.price),
+            #         "size": float(trade.size),
+            #         "buyer_id": trade.buyer_id,
+            #         "seller_id": trade.seller_id,
+            #     })
+
             # Update buyer balances
             if trade.buyer_id not in self.balances:
                 self.balances[trade.buyer_id] = {}
@@ -425,6 +452,28 @@ class Market:
             #         f"{trade.size:.2f}",
             #         trade.timestamp.isoformat()
             #     ])
+
+        # Periodically flush the aggregated trade buffer
+        current_time = datetime.now().timestamp()
+        if current_time - self.last_aggregation_time >= 2:  # Flush every second
+            self._flush_aggregated_trades()
+            self.last_aggregation_time = current_time
+
+    def _flush_aggregated_trades(self):
+        """Emit aggregated trades to the visualization."""
+        for time_key, data in list(self.trade_aggregation_buffer.items()):
+            if data["count"] > 0:
+                average_price = data["total_price"] / data["total_volume"]
+                aggregated_trade = {
+                    "time": time_key,
+                    "average_price": float(average_price),
+                    "total_volume": float(data["total_volume"]),
+                    "count": data["count"],
+                }
+                if self.visualization:
+                    self.visualization.emit_aggregated_trade(aggregated_trade)
+            # Remove processed time key
+            del self.trade_aggregation_buffer[time_key]
 
     def cancel_order(self, security_id: str, order_id: str) -> Optional[Order]:
         """Cancel an order in the market"""

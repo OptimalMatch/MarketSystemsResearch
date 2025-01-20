@@ -4,6 +4,8 @@ import threading
 import time
 import json
 from decimal import Decimal
+from flask_cors import CORS
+
 
 class Visualization:
     def __init__(self, market):
@@ -15,6 +17,7 @@ class Visualization:
         self.app = Flask(__name__)
         self.socketio = SocketIO(self.app)
         self.server_thread = None
+        self.max_markers = 10  # Cap markers to prevent memory issues
 
         # Configure Flask routes
         self._setup_routes()
@@ -37,14 +40,15 @@ class Visualization:
     def start_server(self, port=5000):
         """Start the Flask server in a separate thread."""
         self.server_thread = threading.Thread(
-            target=lambda: self.socketio.run(self.app, port=port, debug=False, allow_unsafe_werkzeug=True)
+            target=lambda: self.socketio.run(self.app, host="127.0.0.1", port=port, debug=False)
         )
         self.server_thread.daemon = True
         self.server_thread.start()
 
     def update_orderbook(self):
-        """Update the order book data."""
+        """Update the order book data and emit it for the DOM chart."""
         for security_id, orderbook in self.market.orderbooks.items():
+            # Prepare data for general orderbook usage
             self.orderbook_data = {
                 "bids": [
                     {"price": float(order.price), "size": float(order.size - order.filled)}
@@ -56,6 +60,20 @@ class Visualization:
                 ]
             }
             self.socketio.emit("orderbook", self.orderbook_data)
+
+            # Prepare data for the Depth of Market (DOM) chart
+            dom_data = {
+                "bids": [
+                    [float(order.price), float(order.size - order.filled)]
+                    for order in orderbook.bids
+                ],
+                "asks": [
+                    [float(order.price), float(order.size - order.filled)]
+                    for order in orderbook.asks
+                ],
+                "security_id": security_id
+            }
+            self.socketio.emit("depth_of_market", dom_data)
 
     def update_candlestick(self, interval=5):
         """Update candlestick data with the latest trades."""
@@ -87,6 +105,7 @@ class Visualization:
             self.socketio.emit("candlestick", self.candlestick_data)
 
 
+
     def update_band_data(self, period=5):
         """Calculate a simple moving average (SMA) band."""
         if len(self.candlestick_data) >= period:
@@ -101,31 +120,47 @@ class Visualization:
             self.socketio.emit("band", self.band_data)
 
     def emit_market_maker_trade(self, marker):
-        """Emit a market maker trade as a marker for the chart."""
-        # Store the marker for future reference
+        """Emit and track market maker trade markers."""
+        if len(self.markers) >= self.max_markers:
+            self.markers.pop(0)  # Maintain size limit
         self.markers.append(marker)
+        #self.socketio.emit("market_maker_marker", marker)
 
-        #print(f"Added {marker}")
+    # def emit_market_maker_trade(self, marker):
+    #     """Emit a market maker trade as a marker for the chart."""
+    #     # Store the marker for future reference
+    #     self.markers.append(marker)
+    #
+    #     #print(f"Added {marker}")
+    #
+    #     # Emit the marker via socket.io
+    #     self.socketio.emit('market_maker_marker', {
+    #         'time': marker['time'],  # Timestamp
+    #         'position': marker['position'],  # Position on the chart
+    #         'color': marker['color'],  # Color for the marker
+    #         'shape': marker['shape'],  # Shape of the marker
+    #         'text': marker['text'],  # Text to display
+    #         'details': {  # Additional details for contextual information
+    #             'price': marker['price'],
+    #             'size': marker['size'],
+    #             'security_id': marker['security_id'],
+    #             'buyer_id': marker['buyer_id'],
+    #             'seller_id': marker['seller_id']
+    #         }
+    #     })
 
-        # Emit the marker via socket.io
-        self.socketio.emit('market_maker_marker', {
-            'time': marker['time'],  # Timestamp
-            'position': marker['position'],  # Position on the chart
-            'color': marker['color'],  # Color for the marker
-            'shape': marker['shape'],  # Shape of the marker
-            'text': marker['text'],  # Text to display
-            'details': {  # Additional details for contextual information
-                'price': marker['price'],
-                'size': marker['size'],
-                'security_id': marker['security_id'],
-                'buyer_id': marker['buyer_id'],
-                'seller_id': marker['seller_id']
-            }
-        })
+    def emit_trade(self, trade):
+        """Emit individual trade data."""
+        self.socketio.emit('trade', trade)
+
+    def emit_aggregated_trade(self, aggregated_trade):
+        """Emit aggregated trade data."""
+        self.socketio.emit('aggregated_trade', aggregated_trade)
 
     def run_visualization(self):
         """Run continuous updates for visualization."""
         while True:
             self.update_orderbook()
             self.update_candlestick()
+
             time.sleep(1)  # Update every second

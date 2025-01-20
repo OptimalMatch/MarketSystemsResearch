@@ -6,3 +6,4 @@ python-dotenv
 psutil
 flask
 flask-socketio
+flask-cors
