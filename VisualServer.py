@@ -30,7 +30,7 @@ def run_simulation_with_visualization():
 
     try:
         # Start the visualization server
-        visualization.start_server(port=5000)
+        visualization.start_server(port=6000)
 
         # Start both the market maker and the rush simulator
         print("Starting market maker, rush simulator, and visualization...")
