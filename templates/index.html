@@ -6,31 +6,148 @@
     <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <style>
-        #chart {
+        #candlestick-chart, #bands-chart {
             width: 100%;
-            height: 600px;
+            height: 400px;
         }
         #orderbook {
             width: 100%;
             height: 500px;
             overflow: auto;
         }
+
+
     </style>
 </head>
 <body>
-    <div id="chart"></div>
+    <h2>Candlestick Chart</h2>
+    <div id="candlestick-chart"></div>
+    <div id="candlestick-legend" style="
+        position: absolute;
+        top: 70px;
+        left: 10px;
+        z-index: 1;
+        font-size: 24px;
+        font-family: sans-serif;
+        line-height: 28px;
+        font-weight: 300;
+        background: rgba(255, 255, 255, 0.8); /* Add transparency */
+        padding: 5px;
+        border-radius: 5px;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    ">
+        <strong>Open:</strong> <span id="open-value">-</span><br/>
+        <strong>High:</strong> <span id="high-value">-</span><br/>
+        <strong>Low:</strong> <span id="low-value">-</span><br/>
+        <strong>Close:</strong> <span id="close-value">-</span>
+    </div>
+
+    <h2>Moving Averages (Bands)</h2>
+    <div id="bands-chart"></div>
+    <div id="bands-legend" style="
+        position: absolute;
+        top: 580px;
+        left: 10px;
+        z-index: 1;
+        font-size: 24px;
+        font-family: sans-serif;
+        line-height: 28px;
+        font-weight: 300;
+        background: rgba(255, 255, 255, 0.8); /* Add transparency */
+        padding: 5px;
+        border-radius: 5px;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    ">
+        <strong>Time:</strong> <span id="band-time">-</span><br/>
+        <strong>SMA:</strong> <span id="sma-value">-</span>
+    </div>
+
     <h2>Order Book</h2>
     <div id="orderbook"></div>
 
     <script>
         const socket = io();
-        const chart = LightweightCharts.createChart(document.getElementById('chart'), { width: 800, height: 400 });
-        const candlestickSeries = chart.addCandlestickSeries();
 
+        // Candlestick chart
+        const candlestickChart = LightweightCharts.createChart(document.getElementById('candlestick-chart'), { width: 800, height: 400 });
+        const candlestickSeries = candlestickChart.addCandlestickSeries();
+
+        // Legend for candlestick chart
+        const openValue = document.getElementById('open-value');
+        const highValue = document.getElementById('high-value');
+        const lowValue = document.getElementById('low-value');
+        const closeValue = document.getElementById('close-value');
+
+        candlestickChart.subscribeCrosshairMove((param) => {
+            if (param && param.time && param.seriesData) {
+                // Retrieve the data for candlestickSeries from seriesData
+                const data = param.seriesData.get(candlestickSeries);
+
+                if (data) {
+                    openValue.textContent = data.open.toFixed(2); // Display the Open price
+                    highValue.textContent = data.high.toFixed(2); // Display the High price
+                    lowValue.textContent = data.low.toFixed(2);   // Display the Low price
+                    closeValue.textContent = data.close.toFixed(2); // Display the Close price
+                    return;
+                }
+            }
+
+            // Reset legend when no valid data is found
+            openValue.textContent = '-';
+            highValue.textContent = '-';
+            lowValue.textContent = '-';
+            closeValue.textContent = '-';
+        });
+
+
+
+        // Bands chart (SMA)
+        const bandsChart = LightweightCharts.createChart(document.getElementById('bands-chart'), {
+            width: 800,
+            height: 400,
+            timeScale: {
+                timeVisible: true,
+                secondsVisible: true, // Show seconds if timestamps have small intervals
+            },
+        });
+        const bandsSeries = bandsChart.addLineSeries({ color: 'blue', lineWidth: 2 });
+
+        // Legend for bands chart
+        const bandTime = document.getElementById('band-time');
+        const smaValue = document.getElementById('sma-value');
+
+        bandsChart.subscribeCrosshairMove((param) => {
+            console.log('Crosshair param:', param); // Debug log
+             if (param && param.time && param.seriesData) {
+                // Retrieve the data for bandsSeries from seriesData
+                const data = param.seriesData.get(bandsSeries);
+
+                if (data && data.value !== undefined) {
+                    bandTime.textContent = new Date(param.time * 1000).toISOString(); // Convert timestamp to readable format
+                    smaValue.textContent = data.value.toFixed(2); // Display the SMA value
+                    return;
+                }
+            }
+
+            // Reset legend when there's no valid data
+            bandTime.textContent = '-';
+            smaValue.textContent = '-';
+        });
+
+
+        // Listen for candlestick updates
         socket.on('candlestick', (data) => {
+            console.log('Candlestick data received:', data); // Debug log
             candlestickSeries.setData(data);
         });
 
+        // Listen for band (SMA) updates
+        socket.on('band', (data) => {
+            console.log('Band data received:', data); // Debug log
+            bandsSeries.setData(data);
+        });
+
+        // Order book
         socket.on('orderbook', (data) => {
             const orderbookDiv = document.getElementById('orderbook');
             orderbookDiv.innerHTML = `

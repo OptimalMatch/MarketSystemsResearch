@@ -10,6 +10,7 @@ class Visualization:
         self.market = market
         self.orderbook_data = {"bids": [], "asks": []}
         self.candlestick_data = []
+        self.band_data = []  # Store SMA data for bands
         self.app = Flask(__name__)
         self.socketio = SocketIO(self.app)
         self.server_thread = None
@@ -76,8 +77,24 @@ class Visualization:
                     'close': trade_price
                 })
 
+            # Update the band data (SMA)
+            self.update_band_data()
+
             self.socketio.emit("candlestick", self.candlestick_data)
-            print(f"Updated candlestick data: {self.candlestick_data}")  # Debug log
+
+
+    def update_band_data(self, period=5):
+        """Calculate a simple moving average (SMA) band."""
+        if len(self.candlestick_data) >= period:
+            sma_values = []
+            for i in range(len(self.candlestick_data) - period + 1):
+                sma = sum(candle["close"] for candle in self.candlestick_data[i:i+period]) / period
+                sma_values.append({
+                    "time": self.candlestick_data[i + period - 1]["time"],
+                    "value": sma
+                })
+            self.band_data = sma_values
+            self.socketio.emit("band", self.band_data)
 
     def run_visualization(self):
         """Run continuous updates for visualization."""
