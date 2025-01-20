@@ -321,6 +321,7 @@ def run_simulation():
     finally:
         rush.stop_rush()
         mm.stop()
+        market.finalize_trades()  # Flush remaining trades
         print("Simulation ended")
 
 

@@ -198,14 +198,11 @@ class OrderBook:
 
         while True:
             match = None
-            if order.side == OrderSide.BUY:
-                # Match against asks (sells)
-                if self.asks and self.asks[0].price <= order.price:
-                    match = self.asks[0]
-            else:
-                # Match against bids (buys)
-                if self.bids and self.bids[0].price >= order.price:
-                    match = self.bids[0]
+            # Use references to avoid repeated list indexing
+            if order.side == OrderSide.BUY and self.asks and self.asks[0].price <= order.price:
+                match = self.asks[0]
+            elif order.side == OrderSide.SELL and self.bids and self.bids[0].price >= order.price:
+                match = self.bids[0]
 
             if not match:
                 logging.debug(f"No match found for order: {order}")
@@ -284,6 +281,8 @@ class OrderBook:
 class Market:
 
     def __init__(self):
+        # Initialize batch buffer for trades
+        self.trade_buffer = []
         # Dynamically generate the filename with the current timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.TRADE_LOG_FILE = Path(f"trades_log_{timestamp}.csv")
@@ -376,6 +375,21 @@ class Market:
             # Optionally log trade details
             logging.info(f"Trade: {trade}")
 
+            # Add to the batch buffer
+            self.trade_buffer.append([
+                trade.id,
+                trade.security_id,
+                trade.buyer_id,
+                trade.seller_id,
+                f"{trade.price:.2f}",
+                f"{trade.size:.2f}",
+                trade.timestamp.isoformat()
+            ])
+
+            # Write to file in batches of 100 trades
+            if len(self.trade_buffer) >= 100:
+                self._flush_trade_buffer()
+
             #Log the trade to the file
             # with self.TRADE_LOG_FILE.open('a', newline='') as file:
             #     writer = csv.writer(file)
@@ -445,6 +459,20 @@ class Market:
     def get_trade_count(self) -> int:
         """Get the total number of executed trades."""
         return self.trade_count
+
+    def _flush_trade_buffer(self):
+        """Flush the trade buffer to the CSV file."""
+        with self.TRADE_LOG_FILE.open('a', newline='') as file:
+            writer = csv.writer(file)
+            if file.tell() == 0:  # Write headers if file is empty
+                writer.writerow(["Trade ID", "Security ID", "Buyer ID", "Seller ID", "Price", "Size", "Timestamp"])
+            writer.writerows(self.trade_buffer)
+        self.trade_buffer.clear()
+
+    def finalize_trades(self):
+        """Flush remaining trades in the buffer."""
+        if self.trade_buffer:
+            self._flush_trade_buffer()
 
 # Example usage
 if __name__ == "__main__":

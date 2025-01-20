@@ -4,3 +4,5 @@ pydantic
 asyncpg  # for PostgreSQL support
 python-dotenv
 psutil
+flask
+flask-socketio

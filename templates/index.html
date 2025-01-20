@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Trading Visualization</title>
+    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        #chart {
+            width: 100%;
+            height: 600px;
+        }
+        #orderbook {
+            width: 100%;
+            height: 500px;
+            overflow: auto;
+        }
+    </style>
+</head>
+<body>
+    <div id="chart"></div>
+    <h2>Order Book</h2>
+    <div id="orderbook"></div>
+
+    <script>
+        const socket = io();
+        const chart = LightweightCharts.createChart(document.getElementById('chart'), { width: 800, height: 400 });
+        const candlestickSeries = chart.addCandlestickSeries();
+
+        socket.on('candlestick', (data) => {
+            candlestickSeries.setData(data);
+        });
+
+        socket.on('orderbook', (data) => {
+            const orderbookDiv = document.getElementById('orderbook');
+            orderbookDiv.innerHTML = `
+                <h3>Bids</h3>
+                <ul>${data.bids.map(order => `<li>${order.price} @ ${order.size}</li>`).join('')}</ul>
+                <h3>Asks</h3>
+                <ul>${data.asks.map(order => `<li>${order.price} @ ${order.size}</li>`).join('')}</ul>
+            `;
+        });
+    </script>
+</body>
+</html>
