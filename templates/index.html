@@ -77,6 +77,7 @@
                 border-radius: 5px;
                 box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
             ">
+                <span id="security-id">-</span><br/>
                 <strong>Open:</strong> <span id="open-value">-</span><br/>
                 <strong>High:</strong> <span id="high-value">-</span><br/>
                 <strong>Low:</strong> <span id="low-value">-</span><br/>
@@ -114,6 +115,7 @@
 
     <script>
         const socket = io();
+        var security_id = "";
 
         // Trade chart
         const tradeChart = LightweightCharts.createChart(document.getElementById('trade-chart'), {
@@ -182,17 +184,22 @@
         const candlestickSeries = candlestickChart.addCandlestickSeries();
 
         // Legend for candlestick chart
+        const securityId = document.getElementById('security-id');
         const openValue = document.getElementById('open-value');
         const highValue = document.getElementById('high-value');
         const lowValue = document.getElementById('low-value');
         const closeValue = document.getElementById('close-value');
 
+        securityId.textContent = security_id;
+
         candlestickChart.subscribeCrosshairMove((param) => {
+            //console.log('Crosshair param:', param); // Debug log
             if (param && param.time && param.seriesData) {
                 // Retrieve the data for candlestickSeries from seriesData
                 const data = param.seriesData.get(candlestickSeries);
 
                 if (data) {
+
                     openValue.textContent = data.open.toFixed(2); // Display the Open price
                     highValue.textContent = data.high.toFixed(2); // Display the High price
                     lowValue.textContent = data.low.toFixed(2);   // Display the Low price
@@ -202,6 +209,7 @@
             }
 
             // Reset legend when no valid data is found
+            securityId.textContent = security_id;
             openValue.textContent = '-';
             highValue.textContent = '-';
             lowValue.textContent = '-';
@@ -227,7 +235,7 @@
         const smaValue = document.getElementById('sma-value');
 
         bandsChart.subscribeCrosshairMove((param) => {
-            console.log('Crosshair param:', param); // Debug log
+            //console.log('Crosshair param:', param); // Debug log
              if (param && param.time && param.seriesData) {
                 // Retrieve the data for bandsSeries from seriesData
                 const data = param.seriesData.get(bandsSeries);
@@ -278,6 +286,8 @@
         socket.on('candlestick', (data) => {
             //console.log('Candlestick data received:', data); // Debug log
             candlestickSeries.setData(data);
+            securityId.textContent = data[0].security_id;
+
         });
 
         // Listen for band (SMA) updates

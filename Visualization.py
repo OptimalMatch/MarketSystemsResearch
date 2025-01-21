@@ -86,12 +86,14 @@ class Visualization:
             if self.candlestick_data and self.candlestick_data[-1]['time'] == current_time:
                 # Update the last candle
                 candle = self.candlestick_data[-1]
+                candle['security_id'] = last_trade.security_id
                 candle['high'] = max(candle['high'], trade_price)
                 candle['low'] = min(candle['low'], trade_price)
                 candle['close'] = trade_price
             else:
                 # Create a new candle
                 self.candlestick_data.append({
+                    'security_id': last_trade.security_id,
                     'time': current_time,
                     'open': trade_price,
                     'high': trade_price,
