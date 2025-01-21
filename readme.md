@@ -1,3 +1,5 @@
+[![Watch the demo video](docs/images/screenshot_home.png)](https://youtu.be/dc28jhKj8og?hd=1 "Demo")
+
 # Exchange System Design Document
 
 ## 1. System Overview
