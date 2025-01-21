@@ -5,7 +5,7 @@ import time
 import json
 from decimal import Decimal
 from flask_cors import CORS
-
+import os
 
 class Visualization:
     def __init__(self, market):
@@ -40,7 +40,7 @@ class Visualization:
     def start_server(self, port=8084):
         """Start the Flask server in a separate thread."""
         self.server_thread = threading.Thread(
-            target=lambda: self.socketio.run(self.app, host="127.0.0.1", port=port, debug=False)
+            target=lambda: self.socketio.run(self.app, host=os.getenv('IP', '0.0.0.0'), port=port, debug=False)
         )
         self.server_thread.daemon = True
         self.server_thread.start()
