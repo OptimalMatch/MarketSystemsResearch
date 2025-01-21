@@ -8,17 +8,18 @@ from MarketMaker import MarketMaker
 from MarketRushSimulator import MarketRushSimulator, get_memory_usage
 from Visualization import Visualization  # The visualization class from earlier
 
-def run_simulation_with_visualization():
+def run_simulation_with_visualization(enable_market_maker: bool = True):
     # Initialize the market
     market = Market()
     security_id = 'AAPL'
     market.create_orderbook(security_id)
 
-    # Create and start the market maker
-    maker_id = 'mm001'
-    market.deposit(maker_id, 'cash', Decimal('100000000000'))
-    market.deposit(maker_id, security_id, Decimal('1000000000'))
-    mm = MarketMaker(market, maker_id, [security_id])
+    if enable_market_maker:
+        # Create and start the market maker
+        maker_id = 'mm001'
+        market.deposit(maker_id, 'cash', Decimal('100000000000'))
+        market.deposit(maker_id, security_id, Decimal('1000000000'))
+        mm = MarketMaker(market, maker_id, [security_id])
 
     # Create the rush simulator
     rush = MarketRushSimulator(market, security_id, num_participants=10000, enable_simulated_sellers=True)
@@ -34,7 +35,8 @@ def run_simulation_with_visualization():
 
         # Start both the market maker and the rush simulator
         print("Starting market maker, rush simulator, and visualization...")
-        mm.start()
+        if enable_market_maker:
+            mm.start()
         rush.start_rush(duration_seconds=300)
 
         start_time = time.time()
@@ -81,10 +83,11 @@ def run_simulation_with_visualization():
     finally:
         # Stop everything
         rush.stop_rush()
-        mm.stop()
+        if enable_market_maker:
+            mm.stop()
         visualization.socketio.stop()  # Stop the Flask server
         market.finalize_trades()  # Flush any remaining trades
         print("Simulation ended.")
 
 if __name__ == "__main__":
-    run_simulation_with_visualization()
+    run_simulation_with_visualization(enable_market_maker=False)

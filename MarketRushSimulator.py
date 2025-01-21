@@ -24,7 +24,7 @@ class MarketRushSimulator:
         self.market = market
         self.security_id = security_id
         self.num_participants = num_participants
-        self.enable_simulated_sellers = enable_simulated_sellers  # New flag
+        self.enable_simulated_sellers = enable_simulated_sellers
         self.is_running = False
         self.thread = None
         self.logger = logging.getLogger(__name__)
@@ -251,20 +251,23 @@ class MarketRushSimulator:
         return self.stats.copy()
 
 
-def run_simulation():
+def run_simulation(enable_market_maker: bool = True):
     # Create and initialize market
     market = Market()
     security_id = 'AAPL'
     market.create_orderbook(security_id)
 
-    # Create and start market maker
-    maker_id = 'mm001'
-    market.deposit(maker_id, 'cash', Decimal('100000000000'))
-    market.deposit(maker_id, security_id, Decimal('1000000000'))
-    mm = MarketMaker(market, maker_id, [security_id])
+    if enable_market_maker:
+        # Create and start market maker
+        maker_id = 'mm001'
+        market.deposit(maker_id, 'cash', Decimal('100000000000'))
+        market.deposit(maker_id, security_id, Decimal('1000000000'))
+        mm = MarketMaker(market, maker_id, [security_id])
 
     # Create rush simulator with sell orders enabled
     rush = MarketRushSimulator(market, security_id, num_participants=10000, enable_simulated_sellers=True)
+
+
 
     # To disable sell orders, set enable_simulated_sellers to False
     # rush = MarketRushSimulator(market, security_id, num_participants=10000, enable_simulated_sellers=False)
@@ -274,7 +277,8 @@ def run_simulation():
     try:
         # Start both systems
         print("Starting market maker and rush simulation...")
-        mm.start()
+        if enable_market_maker:
+            mm.start()
         rush.start_rush(duration_seconds=300)
 
         # Monitor the simulation
@@ -320,7 +324,8 @@ def run_simulation():
         print("\nStopping simulation...")
     finally:
         rush.stop_rush()
-        mm.stop()
+        if enable_market_maker:
+            mm.stop()
         market.finalize_trades()  # Flush remaining trades
         print("Simulation ended")
 
