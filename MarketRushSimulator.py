@@ -4,7 +4,8 @@ import random
 import time
 from typing import List, Dict
 import logging
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+import multiprocessing
 import queue
 from datetime import datetime
 import signal
@@ -105,8 +106,13 @@ class MarketRushSimulator:
 
         self.is_running = True
         self.initialize_participants()
+        
+        # Get available CPU cores
+        cpu_count = multiprocessing.cpu_count()
+        self.logger.info(f"Using {cpu_count} CPU cores for processing")
 
-        # Initialize ThreadPoolExecutor
+        # Initialize multiprocessing for CPU-bound tasks
+        # Use ThreadPoolExecutor for I/O bound tasks (like order placement)
         self.executor = ThreadPoolExecutor(max_workers=self.worker_threads)
 
         # Start simulation thread
@@ -134,6 +140,20 @@ class MarketRushSimulator:
         trades_executed = 0
         last_log_time = start_time
         log_interval = 1.0  # Log every second
+        
+        # Create parallel processing workers
+        cpu_count = multiprocessing.cpu_count()
+        batch_per_cpu = max(1, self.batch_size // cpu_count)
+        
+        # Divide work into chunks for better CPU utilization
+        def process_order_batch(batch_start, batch_end):
+            results = []
+            for _ in range(batch_start, batch_end):
+                if not self.is_running:
+                    break
+                result = self._place_rush_order()
+                results.append(result)
+            return results
 
         try:
             while time.time() < end_time and self.is_running:
@@ -149,43 +169,40 @@ class MarketRushSimulator:
                     except Exception as e:
                         self.logger.error(f"Error getting market depth: {str(e)}")
 
-                # Submit batch of orders
+                # Submit batches divided by CPU cores
                 futures = []
-                for _ in range(self.batch_size):
-                    if not self.is_running:
-                        break
-                    futures.append(
-                        self.executor.submit(self._place_rush_order)
-                    )
+                for i in range(0, cpu_count):
+                    batch_start = i * batch_per_cpu
+                    batch_end = min((i + 1) * batch_per_cpu, self.batch_size)
+                    if batch_end > batch_start:
+                        future = self.executor.submit(process_order_batch, batch_start, batch_end)
+                        futures.append(future)
 
-                # Process completed orders in parallel
-                completed_futures = []
+                # Process completed batches
+                completed_results = []
                 for future in futures:
                     if not self.is_running:
                         break
                     try:
-                        result = future.result(timeout=0.5)
-                        completed_futures.append(result)
-                        if result:
-                            orders_placed += 1
-                            trades_executed += 1
+                        results = future.result(timeout=1.0)
+                        completed_results.extend(results)
                     except Exception as e:
-                        self.logger.error(f"Error processing order: {str(e)}")
-                        self.stats['failed_orders'] += 1
-                        self.stats['total_orders'] += 1
+                        self.logger.error(f"Error processing batch: {str(e)}")
 
-                # Bulk update stats
-                successes = sum(1 for result in completed_futures if result)
+                # Update statistics
+                successes = sum(1 for result in completed_results if result)
+                orders_placed += successes
+                trades_executed += successes
                 self.stats['successful_orders'] += successes
-                self.stats['failed_orders'] += (len(completed_futures) - successes)
-                self.stats['total_orders'] += len(completed_futures)
+                self.stats['failed_orders'] += (len(completed_results) - successes)
+                self.stats['total_orders'] += len(completed_results)
 
                 # Log performance metrics periodically
                 current_time = time.time()
                 if current_time - last_log_time >= log_interval:
                     elapsed_time = current_time - start_time
-                    orders_per_sec = orders_placed / elapsed_time
-                    trades_per_sec = trades_executed / elapsed_time
+                    orders_per_sec = orders_placed / elapsed_time if elapsed_time > 0 else 0
+                    trades_per_sec = trades_executed / elapsed_time if elapsed_time > 0 else 0
                     memory_usage = psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024  # MB
                     
                     self.logger.info("Performance Metrics:")
@@ -195,6 +212,7 @@ class MarketRushSimulator:
                     
                     last_log_time = current_time
                 
+                # Use minimal delay
                 time.sleep(self.batch_delay)
 
         except Exception as e:
