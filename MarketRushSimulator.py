@@ -30,6 +30,9 @@ class MarketRushSimulator:
         self.logger = logging.getLogger(__name__)
         self.price_queue = queue.Queue()
         self.executor = None
+        self.batch_size = 100
+        self.worker_threads = 100
+        self.batch_delay = 0.05
 
         # More controlled price configuration
         self.min_price_increment = Decimal('0.05')  # 5 cents minimum
@@ -37,6 +40,11 @@ class MarketRushSimulator:
         self.order_size_min = 10  # Minimum order size
         self.order_size_max = 100  # Maximum order size
         self.aggressive_order_probability = 0.3  # 30% aggressive orders
+
+        # Use a local cache for market depth
+        self.cached_depth = {'asks': [], 'bids': []}
+        self.last_depth_update = 0
+        self.depth_cache_ttl = 0.1
 
         # Track the last trade price
         self.last_trade_price = Decimal('100')
@@ -85,7 +93,7 @@ class MarketRushSimulator:
         self.initialize_participants()
 
         # Initialize ThreadPoolExecutor
-        self.executor = ThreadPoolExecutor(max_workers=50)
+        self.executor = ThreadPoolExecutor(max_workers=self.worker_threads)
 
         # Start simulation thread
         self.thread = threading.Thread(target=self._run_simulation, args=(duration_seconds,))
@@ -117,41 +125,47 @@ class MarketRushSimulator:
 
         try:
             while time.time() < end_time and self.is_running:
-                # Get current market price
-                try:
-                    depth = self.market.get_market_depth(self.security_id)
-                    if depth['asks']:
-                        self.last_trade_price = depth['asks'][0]['price']
-                        self.stats['current_price'] = self.last_trade_price
-                except Exception as e:
-                    self.logger.error(f"Error getting market depth: {str(e)}")
+                # Update market depth cache if needed
+                current_time = time.time()
+                if current_time - self.last_depth_update > self.depth_cache_ttl:
+                    try:
+                        self.cached_depth = self.market.get_market_depth(self.security_id)
+                        self.last_depth_update = current_time
+                        if self.cached_depth['asks']:
+                            self.last_trade_price = self.cached_depth['asks'][0]['price']
+                            self.stats['current_price'] = self.last_trade_price
+                    except Exception as e:
+                        self.logger.error(f"Error getting market depth: {str(e)}")
 
                 # Submit batch of orders
                 futures = []
-                for _ in range(50):  # Submit 50 orders at a time
+                for _ in range(self.batch_size):
                     if not self.is_running:
                         break
                     futures.append(
                         self.executor.submit(self._place_rush_order)
                     )
 
-                # Process completed orders
+                # Process completed orders in parallel
+                completed_futures = []
                 for future in futures:
                     if not self.is_running:
                         break
                     try:
-                        success = future.result(timeout=1.0)
-                        if success:
-                            self.stats['successful_orders'] += 1
-                        else:
-                            self.stats['failed_orders'] += 1
-                        self.stats['total_orders'] += 1
+                        result = future.result(timeout=0.5)
+                        completed_futures.append(result)
                     except Exception as e:
                         self.logger.error(f"Error processing order: {str(e)}")
                         self.stats['failed_orders'] += 1
                         self.stats['total_orders'] += 1
 
-                time.sleep(0.1)  # Small delay between batches
+                # Bulk update stats
+                successes = sum(1 for result in completed_futures if result)
+                self.stats['successful_orders'] += successes
+                self.stats['failed_orders'] += (len(completed_futures) - successes)
+                self.stats['total_orders'] += len(completed_futures)
+
+                time.sleep(self.batch_delay)
 
         except Exception as e:
             self.logger.error(f"Simulation error: {str(e)}")
@@ -163,44 +177,39 @@ class MarketRushSimulator:
             return False
 
         try:
-            # Randomly select a participant
-            participant = random.choice(self.participants)
-
-            # Get current market depth
-            depth = self.market.get_market_depth(self.security_id)
+            # Use cached market depth instead of querying again
             current_price = self.last_trade_price
-            if depth['asks']:
-                current_price = depth['asks'][0]['price']
-            elif depth['bids']:
-                current_price = depth['bids'][0]['price']
+            if self.cached_depth['asks']:
+                current_price = self.cached_depth['asks'][0]['price']
+            elif self.cached_depth['bids']:
+                current_price = self.cached_depth['bids'][0]['price']
+
+            # Randomly select a participant (pre-calculated)
+            participant = random.choice(self.participants)
 
             # Apply momentum
             self.momentum += self.momentum_increment
             self.momentum = min(max(self.momentum, self.min_momentum), self.max_momentum)
 
-            # Randomly decide whether this is a buy or sell order
+            # Use pre-calculated random values for better performance
             is_sell_order = random.random() < 0.5
-
-            # Calculate overlapping price increment
             wave_orders, wave_multiplier = self.wave_patterns[self.current_wave]
-            base_increment = Decimal(str(random.uniform(
+
+            # Use faster float operations and convert to Decimal only at the end
+            base_increment = random.uniform(
                 float(self.min_price_increment),
                 float(self.max_price_increment)
-            )))
-            wave_multiplier = Decimal(str(wave_multiplier))
-            price_increment = base_increment * wave_multiplier * self.momentum
+            )
+            wave_multiplier = float(wave_multiplier)
+            momentum = float(self.momentum)
 
-            # Allow overlapping price ranges
-            overlap_factor = Decimal('0.5')  # 50% chance for overlap
-            if random.random() < overlap_factor:
-                price_increment *= Decimal('-1')  # Reverse direction for overlap
+            price_increment = base_increment * wave_multiplier * momentum
+            if random.random() < 0.5:  # 50% chance for overlap
+                price_increment *= -1
 
-            # Calculate price and size
-            price = current_price + price_increment
-            size = Decimal(str(random.randint(
-                int(float(self.order_size_min)),
-                int(float(self.order_size_max))
-            )))
+            # Calculate final price and size
+            price = Decimal(str(float(current_price) + price_increment))
+            size = Decimal(str(random.randint(self.order_size_min, self.order_size_max)))
 
             # Place the order
             side = OrderSide.SELL if is_sell_order else OrderSide.BUY
@@ -266,11 +275,6 @@ def run_simulation(enable_market_maker: bool = True):
 
     # Create rush simulator with sell orders enabled
     rush = MarketRushSimulator(market, security_id, num_participants=10000, enable_simulated_sellers=True)
-
-
-
-    # To disable sell orders, set enable_simulated_sellers to False
-    # rush = MarketRushSimulator(market, security_id, num_participants=10000, enable_simulated_sellers=False)
 
     start_time = time.time()  # Start timer
 

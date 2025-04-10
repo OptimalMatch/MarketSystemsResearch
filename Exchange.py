@@ -81,7 +81,6 @@ class Exchange:
         self.logger = logging.getLogger(__name__)
 
 
-
     def next_order_id(self) -> str:
         """Generate next order ID"""
         self.order_id_counter += 1
@@ -301,6 +300,11 @@ class Market:
         self.logger = logging.getLogger(__name__)
         self.visualization = None  # Add reference to Visualization
 
+        # Add market depth cache
+        self.market_depth_cache = {}
+        self.last_depth_update = {}
+        self.depth_cache_ttl = 0.1  # 100ms TTL
+
     def set_visualization(self, visualization):
         """Set the visualization instance."""
         self.visualization = visualization
@@ -326,6 +330,12 @@ class Market:
         order = Order.create(owner_id, side, price, size, security_id)
         trades = self.orderbooks[security_id].add_order(order)
         self._process_trades(trades)
+
+        if trades:
+            # Invalidate market depth cache when trades occur
+            if security_id in self.market_depth_cache:
+                del self.market_depth_cache[security_id]
+                del self.last_depth_update[security_id]
 
         return order.id  # Return just the order ID
 
@@ -482,19 +492,40 @@ class Market:
         return self.orderbooks[security_id].cancel_order(order_id)
 
     def get_market_depth(self, security_id: str, levels: int = 5) -> dict:
-        """Get market depth for a security"""
+        """Get market depth for a security with caching"""
+        current_time = datetime.now().timestamp()
+        
+        # Check if we have a valid cached depth
+        if (security_id in self.market_depth_cache and 
+            security_id in self.last_depth_update and
+            current_time - self.last_depth_update[security_id] < self.depth_cache_ttl):
+            return self.market_depth_cache[security_id]
+
         if security_id not in self.orderbooks:
             raise ValueError(f"No orderbook for security {security_id}")
 
         orderbook = self.orderbooks[security_id]
+        
+        # Sort orders by price (bids descending, asks ascending)
+        bids = sorted(
+            [{"price": o.price, "size": o.size - o.filled} 
+             for o in orderbook.bids if o.size > o.filled],
+            key=lambda x: x["price"],
+            reverse=True
+        )[:levels]
+        
+        asks = sorted(
+            [{"price": o.price, "size": o.size - o.filled} 
+             for o in orderbook.asks if o.size > o.filled],
+            key=lambda x: x["price"]
+        )[:levels]
 
-        return {
-            'bids': [{'price': o.price, 'size': o.size - o.filled}
-                     for o in orderbook.bids[:levels]],
-            'asks': [{'price': o.price, 'size': o.size - o.filled}
-                     for o in orderbook.asks[:levels]],
-            'last_price': orderbook.get_market_price()
-        }
+        # Cache the result
+        depth = {"bids": bids, "asks": asks}
+        self.market_depth_cache[security_id] = depth
+        self.last_depth_update[security_id] = current_time
+        
+        return depth
 
     def get_balance(self, user_id: str, security_id: Optional[str] = None) -> Dict[str, Decimal]:
         """Get user's balance for all securities or a specific security"""
