@@ -97,10 +97,10 @@ class Visualization:
             raise
 
     def update_orderbook(self):
-        """Update the order book data and emit it for the DOM chart."""
+        """Update the order book data and emit it for the DOM chart"""
         try:
             for security_id, orderbook in self.market.orderbooks.items():
-                # Prepare data for general orderbook usage
+                # Prepare data for general orderbook usage - limit depth for performance
                 self.orderbook_data = {
                     "bids": [
                         {"price": float(order.price), "size": float(order.size - order.filled)}
@@ -113,15 +113,15 @@ class Visualization:
                 }
                 self.socketio.emit("orderbook", self.orderbook_data)
 
-                # Prepare data for the Depth of Market (DOM) chart
+                # Prepare data for the Depth of Market (DOM) chart - limit depth for performance
                 dom_data = {
                     "bids": [
                         [float(order.price), float(order.size - order.filled)]
-                        for order in orderbook.bids
+                        for order in orderbook.bids[:Config.ORDERBOOK_DEPTH * 2]  # Double depth but still limited
                     ],
                     "asks": [
                         [float(order.price), float(order.size - order.filled)]
-                        for order in orderbook.asks
+                        for order in orderbook.asks[:Config.ORDERBOOK_DEPTH * 2]  # Double depth but still limited
                     ],
                     "security_id": security_id
                 }
@@ -200,11 +200,22 @@ class Visualization:
 
     def run_visualization(self):
         """Run continuous updates for visualization."""
+        update_count = 0
+        orderbook_frequency = 1  # Update orderbook every second
+        candlestick_frequency = 2  # Update candlesticks less frequently
+        
         while True:
-            self.update_orderbook()
-            self.update_candlestick()
+            update_count += 1
+            
+            # Always update orderbook (critical for depth chart)
+            if update_count % orderbook_frequency == 0:
+                self.update_orderbook()
+                
+            # Update candlesticks less frequently to reduce browser load
+            if update_count % candlestick_frequency == 0:
+                self.update_candlestick()
 
-            time.sleep(1)  # Update every second
+            time.sleep(0.5)  # Update twice per second
 
     def update_band_data(self, period=None):
         """Calculate a simple moving average (SMA) band."""

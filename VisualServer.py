@@ -64,6 +64,13 @@ class MarketServer:
         # Start visualization server
         self.visualization.start_server(port=Config.PORT)
         
+        # Start visualization updates in a separate thread
+        import threading
+        self.vis_thread = threading.Thread(target=self.visualization.run_visualization)
+        self.vis_thread.daemon = True
+        self.vis_thread.start()
+        logger.info("Started visualization updates thread")
+        
         # Start monitoring loop
         self.start_monitoring()
 

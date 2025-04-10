@@ -118,6 +118,9 @@
         const socket = io();
         var security_id = "";
 
+        // Define variables for DOM elements
+        const securityId = document.getElementById('security-id');
+
         // Trade chart
         const tradeChart = LightweightCharts.createChart(document.getElementById('trade-chart'), {
             width: 800,
@@ -186,7 +189,6 @@
         const candlestickSeries = candlestickChart.addCandlestickSeries();
 
         // Legend for candlestick chart
-        const securityId = document.getElementById('security-id');
         const openValue = document.getElementById('open-value');
         const highValue = document.getElementById('high-value');
         const lowValue = document.getElementById('low-value');
@@ -321,11 +323,22 @@
 <!--        });-->
 
         // Listen for candlestick updates
+        let lastCandlestickUpdate = 0;
+        const CANDLESTICK_THROTTLE_MS = 300; // Only update candlestick chart every 300ms
+        
         socket.on('candlestick', (data) => {
+            const now = performance.now();
+            // Throttle updates to reduce browser load
+            if (now - lastCandlestickUpdate < CANDLESTICK_THROTTLE_MS) {
+                return;
+            }
+            lastCandlestickUpdate = now;
+            
             //console.log('Candlestick data received:', data); // Debug log
             candlestickSeries.setData(data);
-            securityId.textContent = data[0].security_id;
-
+            if (data && data.length > 0 && data[0].security_id) {
+                securityId.textContent = data[0].security_id;
+            }
         });
 
         // Order book
@@ -454,8 +467,18 @@
             }]
         });
 
-        // Listen for depth-of-market data from the server
+        // DOM chart (using lightweight-charts instead of Highcharts for better performance)
+        let lastDOMUpdate = 0;
+        const DOM_THROTTLE_MS = 200; // Only update DOM chart every 200ms
+        
         socket.on('depth_of_market', (domData) => {
+            const now = performance.now();
+            // Throttle updates to reduce browser load
+            if (now - lastDOMUpdate < DOM_THROTTLE_MS) {
+                return;
+            }
+            lastDOMUpdate = now;
+            
             if (domData && domData.bids && domData.asks) {
                 // Sort bids in ascending order by price (X-axis)
                 const sortedBids = domData.bids.sort((a, b) => a[0] - b[0]);
