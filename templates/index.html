@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <title>Trading Visualization</title>
-    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+    <!--<script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>-->
+    <script src="/static/js/lightweight-charts@4.2.3/lightweight-charts.standalone.production.js"></script>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <script src="https://code.highcharts.com/highcharts.js"></script>
     <script src="https://code.highcharts.com/modules/accessibility.js"></script>
@@ -123,7 +124,7 @@
             height: 400,
             timeScale: {
                 timeVisible: true,
-                secondsVisible: true, // Show seconds if timestamps have small intervals
+                secondsVisible: true,
             },
             layout: { textColor: 'white', background: { type: 'solid', color: 'black' } }
         });
@@ -132,6 +133,7 @@
             priceFormat: {
                 type: 'volume',
             },
+            priceScaleId: 'volume',
             scaleMargins: {
                 top: 0.8,
                 bottom: 0,

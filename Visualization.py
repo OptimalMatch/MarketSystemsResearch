@@ -1,4 +1,4 @@
-from flask import Flask, render_template
+from flask import Flask, render_template, send_from_directory
 from flask_socketio import SocketIO, emit
 import threading
 import time
@@ -27,6 +27,11 @@ class Visualization:
         def index():
             """Serve the TradingView visualization page."""
             return render_template("index.html")
+
+        @self.app.route('/static/js/<path:filename>')
+        def serve_js(filename):
+            """Serve JavaScript files from templates directory."""
+            return send_from_directory('templates', filename)
 
         @self.socketio.on("connect")
         def on_connect():
