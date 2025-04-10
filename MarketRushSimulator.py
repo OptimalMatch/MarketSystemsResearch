@@ -100,7 +100,7 @@ class MarketRushSimulator:
         print("\nReceived shutdown signal. Stopping simulation...")
         self.stop_rush()
 
-    def start_rush(self, duration_seconds: int = 300):
+    def start_rush(self, duration_seconds=300):
         """Start the market rush simulation"""
         if self.is_running:
             return
@@ -121,15 +121,9 @@ class MarketRushSimulator:
     def stop_rush(self):
         """Stop the market rush simulation"""
         self.is_running = False
-
         if self.executor:
             self.executor.shutdown(wait=True)
-            self.executor = None
-
-        if self.thread:
-            self.thread.join(timeout=2.0)
-
-        self.logger.info("Market rush stopped")
+        self.logger.info("Market rush simulation stopped")
 
     def _run_simulation(self, duration_seconds: int):
         """Main simulation loop"""

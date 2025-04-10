@@ -27,6 +27,7 @@ def get_memory_usage():
 class MarketServer:
     def __init__(self):
         self.market = Market()
+        self.is_running = True
         self.setup_signal_handlers()
         
         # Initialize visualization
@@ -72,12 +73,25 @@ class MarketServer:
     def handle_shutdown(self, signum, frame):
         """Handle shutdown signals gracefully."""
         logger.info("Shutting down market server...")
-        if hasattr(self, 'market_maker'):
-            self.market_maker.stop()
+        
+        # Stop the monitoring loop
+        self.is_running = False
+        
+        # Stop market components in order
         if hasattr(self, 'rush_simulator'):
+            logger.info("Stopping rush simulator...")
             self.rush_simulator.stop_rush()
+            self.rush_simulator.is_running = False
+        
+        if hasattr(self, 'market_maker'):
+            logger.info("Stopping market maker...")
+            self.market_maker.stop()
+        
         if hasattr(self, 'visualization'):
+            logger.info("Stopping visualization server...")
             self.visualization.socketio.stop()
+            
+        logger.info("Shutdown complete")
         sys.exit(0)
 
     def start_monitoring(self):
@@ -86,7 +100,7 @@ class MarketServer:
         last_orders = 0
         last_trades = 0
         
-        while True:
+        while self.is_running:
             try:
                 current_time = time.time()
                 elapsed = current_time - start_time
