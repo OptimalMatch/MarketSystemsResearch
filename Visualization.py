@@ -6,9 +6,15 @@ import json
 from decimal import Decimal
 from flask_cors import CORS
 import os
+import logging
 
 from config import Config
 from logger import setup_logger
+
+# Disable noisy socketio logging
+logging.getLogger('socketio').setLevel(logging.ERROR)
+logging.getLogger('engineio').setLevel(logging.ERROR)
+logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
 logger = setup_logger(__name__)
 
@@ -21,7 +27,16 @@ class Visualization:
         self.markers = []  # To store emitted markers
         self.app = Flask(__name__)
         CORS(self.app)  # Enable CORS for all routes
-        self.socketio = SocketIO(self.app, cors_allowed_origins="*")
+        self.socketio = SocketIO(
+            self.app,
+            cors_allowed_origins="*",
+            async_mode='eventlet',
+            ping_timeout=5,
+            ping_interval=1,
+            max_http_buffer_size=1e8,
+            logger=False,
+            engineio_logger=False
+        )
         self.server_thread = None
         self.max_markers = Config.MAX_MARKERS
 

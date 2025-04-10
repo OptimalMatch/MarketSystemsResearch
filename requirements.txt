@@ -8,3 +8,4 @@ flask
 flask-socketio
 flask-cors
 gevent
+eventlet

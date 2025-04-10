@@ -12,6 +12,7 @@ import sys
 from Exchange import Market, OrderSide
 from MarketMaker import MarketMaker
 import psutil
+import os
 
 def get_memory_usage():
     """Return memory usage in MB."""
@@ -137,6 +138,10 @@ class MarketRushSimulator:
 
         start_time = time.time()
         end_time = start_time + duration_seconds
+        orders_placed = 0
+        trades_executed = 0
+        last_log_time = start_time
+        log_interval = 1.0  # Log every second
 
         try:
             while time.time() < end_time and self.is_running:
@@ -169,6 +174,9 @@ class MarketRushSimulator:
                     try:
                         result = future.result(timeout=0.5)
                         completed_futures.append(result)
+                        if result:
+                            orders_placed += 1
+                            trades_executed += 1
                     except Exception as e:
                         self.logger.error(f"Error processing order: {str(e)}")
                         self.stats['failed_orders'] += 1
@@ -180,6 +188,21 @@ class MarketRushSimulator:
                 self.stats['failed_orders'] += (len(completed_futures) - successes)
                 self.stats['total_orders'] += len(completed_futures)
 
+                # Log performance metrics periodically
+                current_time = time.time()
+                if current_time - last_log_time >= log_interval:
+                    elapsed_time = current_time - start_time
+                    orders_per_sec = orders_placed / elapsed_time
+                    trades_per_sec = trades_executed / elapsed_time
+                    memory_usage = psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024  # MB
+                    
+                    self.logger.info("Performance Metrics:")
+                    self.logger.info(f"Memory Usage: {memory_usage:.2f} MB")
+                    self.logger.info(f"Order Throughput: {orders_per_sec:.2f} orders/sec")
+                    self.logger.info(f"Trade Throughput: {trades_per_sec:.2f} trades/sec")
+                    
+                    last_log_time = current_time
+                
                 time.sleep(self.batch_delay)
 
         except Exception as e:
