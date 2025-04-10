@@ -6,18 +6,12 @@
 
 2. Set up Python environment:
 ```bash
-# Install pyenv if you haven't already
-brew install pyenv  # On macOS
-# Or visit https://github.com/pyenv/pyenv#installation for other platforms
+# Install Miniconda if you haven't already
+# Visit https://docs.conda.io/en/latest/miniconda.html for installation instructions
 
-# Install Python 3.9+ using pyenv
-pyenv install 3.9.0
-pyenv local 3.9.0
-
-# Create and activate virtual environment
-python -m venv venv
-source venv/bin/activate  # On Unix/macOS
-# Or `venv\Scripts\activate` on Windows
+# Create and activate conda environment
+conda create -n market_systems python=3.9
+conda activate market_systems
 
 # Install dependencies
 pip install -r requirements.txt
@@ -36,6 +30,27 @@ python VisualServer.py
 ## 1. System Overview
 
 The Exchange System is a Python-based implementation of a security trading platform that supports order matching, balance management, and trade settlement. The system implements a price-time priority matching algorithm and maintains separate orderbooks for different securities.
+
+The current system uses 1-2 CPU cores for order matching and trade settlement, and 1-2 CPU cores for visualization. The number of CPU cores can be adjusted in the configuration file.
+
+Out of the gate, we see 85k orders/sec and 34k trades/sec. It stabilizes at around 40k orders/sec and 20k trades/sec.  HFT systems can reach up to 100k orders/sec and 50k trades/sec.  If we separated the metrics capture further, we could reach that level.
+
+Example Output:
+
+      Performance Metrics:
+      Memory Usage: 100.89 MB
+      Order Throughput: 85395.00 orders/sec
+      Trade Throughput: 34595.00 trades/sec
+      
+      Rush Statistics:
+      Total Orders: 85440
+      Successful Orders: 85440
+      Failed Orders: 0
+      Current Price: 101.00288946853985
+      Price Movement: 1.00%
+      Volume: 1219900
+      Total Trades: 34627
+
 
 ## 2. Core Components
 
