@@ -451,7 +451,15 @@ class Market:
             
             # Update trade stats
             self.trade_count += 1
-            self.trade_buffer.append(trade)
+            self.trade_buffer.append([
+                trade.id, trade.security_id, trade.buyer_id, 
+                trade.seller_id, float(trade.price), float(trade.size), 
+                trade.timestamp.isoformat()
+            ])
+            
+            # Flush trade buffer to CSV if full
+            if len(self.trade_buffer) >= self.trade_buffer_size:
+                self._flush_trade_buffer()
             
             # Update trade aggregation
             agg = self.trade_aggregation_buffer[trade.security_id]
