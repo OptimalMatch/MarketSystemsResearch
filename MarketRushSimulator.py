@@ -33,9 +33,7 @@ class MarketRushSimulator:
         self.executor = None
         self.batch_size = 200  # Increased from 100
         self.worker_threads = 200  # Increased from 100
-        self.batch_delay = 0.025  # Reduced from 0.05
-
-        # More controlled price configuration
+        self.batch_delay = 0.0001  # Minimal delay for maximum throughput
         self.min_price_increment = Decimal('0.05')  # 5 cents minimum
         self.max_price_increment = Decimal('0.25')  # 25 cents maximum
         self.order_size_min = 10  # Minimum order size
@@ -308,6 +306,8 @@ class MarketRushSimulator:
 
             # Place the order
             side = OrderSide.SELL if is_sell_order else OrderSide.BUY
+
+            # Directly place order without statistics overhead - pure speed
             self.market.place_order(
                 owner_id=participant,
                 security_id=self.security_id,
@@ -316,21 +316,15 @@ class MarketRushSimulator:
                 size=size
             )
 
-            # Update wave pattern
+            # Minimal stats updates - only essential ones
+            self.stats['total_orders'] += 1
+            self.stats['successful_orders'] += 1
             self.orders_in_current_wave += 1
+
+            # Only update wave pattern when needed (less frequently)
             if self.orders_in_current_wave >= wave_orders:
                 self.current_wave = (self.current_wave + 1) % len(self.wave_patterns)
                 self.orders_in_current_wave = 0
-
-            # Update stats
-            self.stats['volume'] += size
-            self.stats['current_price'] = price
-            self.stats['highest_price'] = max(self.stats['highest_price'], price)
-            if self.stats['start_price'] > 0:
-                self.stats['price_movement_percent'] = (
-                        (self.stats['current_price'] - self.stats['start_price']) /
-                        self.stats['start_price'] * Decimal('100')
-                )
 
             return True
 

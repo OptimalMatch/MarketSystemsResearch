@@ -51,11 +51,13 @@ class MarketServer:
             num_participants=Config.NUM_PARTICIPANTS,
             enable_simulated_sellers=Config.ENABLE_SIMULATED_SELLERS
         )
-        # Configure simulator parameters for high throughput
-        self.rush_simulator.batch_size = 200
-        self.rush_simulator.worker_threads = 200
-        self.rush_simulator.batch_delay = 0.001
-        
+        # Configure simulator parameters for maximum throughput
+        self.rush_simulator.batch_size = 500  # Increased from 200
+        self.rush_simulator.worker_threads = 400  # Increased from 200
+        self.rush_simulator.batch_delay = 0.0001  # Minimal delay for maximum throughput
+        self.rush_simulator.order_size_min = 5  # Smaller orders for faster processing
+        self.rush_simulator.order_size_max = 50  # Smaller max order for faster matching
+
         # Start the simulator
         self.rush_simulator.start_rush(duration_seconds=Config.SIMULATION_DURATION)
         
