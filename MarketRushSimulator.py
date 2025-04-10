@@ -30,9 +30,9 @@ class MarketRushSimulator:
         self.logger = logging.getLogger(__name__)
         self.price_queue = queue.Queue()
         self.executor = None
-        self.batch_size = 100
-        self.worker_threads = 100
-        self.batch_delay = 0.05
+        self.batch_size = 200  # Increased from 100
+        self.worker_threads = 200  # Increased from 100
+        self.batch_delay = 0.025  # Reduced from 0.05
 
         # More controlled price configuration
         self.min_price_increment = Decimal('0.05')  # 5 cents minimum
@@ -44,7 +44,22 @@ class MarketRushSimulator:
         # Use a local cache for market depth
         self.cached_depth = {'asks': [], 'bids': []}
         self.last_depth_update = 0
-        self.depth_cache_ttl = 0.1
+        self.depth_cache_ttl = 0.1  # 100ms cache TTL
+
+        # Pre-calculate pools for better performance
+        self.participant_pool = []
+        self.participant_pool_size = 1000
+        self.current_participant_index = 0
+        
+        # Pre-calculate price increment pool
+        self.price_increment_pool = []
+        self.price_increment_pool_size = 1000
+        self.current_price_increment_index = 0
+        
+        # Pre-calculate order size pool
+        self.order_size_pool = []
+        self.order_size_pool_size = 1000
+        self.current_order_size_index = 0
 
         # Track the last trade price
         self.last_trade_price = Decimal('100')
@@ -172,6 +187,74 @@ class MarketRushSimulator:
         finally:
             self.is_running = False
 
+    def _refill_pools(self):
+        """Pre-calculate pools of random values"""
+        # Refill participant pool
+        self.participant_pool = [random.choice(self.participants) for _ in range(self.participant_pool_size)]
+        self.current_participant_index = 0
+        
+        # Refill price increment pool
+        self.price_increment_pool = [
+            random.uniform(float(self.min_price_increment), float(self.max_price_increment))
+            for _ in range(self.price_increment_pool_size)
+        ]
+        self.current_price_increment_index = 0
+        
+        # Refill order size pool
+        self.order_size_pool = [
+            random.randint(self.order_size_min, self.order_size_max)
+            for _ in range(self.order_size_pool_size)
+        ]
+        self.current_order_size_index = 0
+
+    def _get_next_from_pool(self, pool, size, current_index_attr):
+        """Get next item from a pool, refill if needed"""
+        current_index = getattr(self, current_index_attr)
+        if current_index >= size:
+            self._refill_pools()
+            current_index = 0
+        
+        item = pool[current_index]
+        setattr(self, current_index_attr, current_index + 1)
+        return item
+
+    def _get_next_participant(self):
+        """Get next participant from pool"""
+        return self._get_next_from_pool(
+            self.participant_pool,
+            self.participant_pool_size,
+            'current_participant_index'
+        )
+
+    def _get_next_price_increment(self):
+        """Get next price increment from pool"""
+        return self._get_next_from_pool(
+            self.price_increment_pool,
+            self.price_increment_pool_size,
+            'current_price_increment_index'
+        )
+
+    def _get_next_order_size(self):
+        """Get next order size from pool"""
+        return self._get_next_from_pool(
+            self.order_size_pool,
+            self.order_size_pool_size,
+            'current_order_size_index'
+        )
+
+    def initialize_participants(self):
+        """Initialize participants with more funding"""
+        self.participants = []
+        for i in range(self.num_participants):
+            participant_id = f"participant_{i}"
+            # Give each participant more initial funding
+            self.market.deposit(participant_id, "cash", Decimal("1000000"))
+            self.market.deposit(participant_id, self.security_id, Decimal("10000"))
+            self.participants.append(participant_id)
+
+        # Pre-fill all random pools
+        self._refill_pools()
+
     def _place_rush_order(self) -> bool:
         if not self.is_running:
             return False
@@ -184,32 +267,27 @@ class MarketRushSimulator:
             elif self.cached_depth['bids']:
                 current_price = self.cached_depth['bids'][0]['price']
 
-            # Randomly select a participant (pre-calculated)
-            participant = random.choice(self.participants)
-
-            # Apply momentum
-            self.momentum += self.momentum_increment
-            self.momentum = min(max(self.momentum, self.min_momentum), self.max_momentum)
-
+            # Get pre-calculated values from pools
+            participant = self._get_next_participant()
+            base_increment = self._get_next_price_increment()
+            order_size = self._get_next_order_size()
+            
             # Use pre-calculated random values for better performance
             is_sell_order = random.random() < 0.5
             wave_orders, wave_multiplier = self.wave_patterns[self.current_wave]
-
-            # Use faster float operations and convert to Decimal only at the end
-            base_increment = random.uniform(
-                float(self.min_price_increment),
-                float(self.max_price_increment)
-            )
+            
+            # Use faster float operations
             wave_multiplier = float(wave_multiplier)
             momentum = float(self.momentum)
-
+            current_price_float = float(current_price)
+            
             price_increment = base_increment * wave_multiplier * momentum
             if random.random() < 0.5:  # 50% chance for overlap
                 price_increment *= -1
 
             # Calculate final price and size
-            price = Decimal(str(float(current_price) + price_increment))
-            size = Decimal(str(random.randint(self.order_size_min, self.order_size_max)))
+            price = Decimal(str(current_price_float + price_increment))
+            size = Decimal(str(order_size))
 
             # Place the order
             side = OrderSide.SELL if is_sell_order else OrderSide.BUY
@@ -242,18 +320,6 @@ class MarketRushSimulator:
         except Exception as e:
             self.logger.error(f"Order placement failed: {str(e)}")
             return False
-
-    def initialize_participants(self):
-        """Initialize participants with more funding"""
-        self.participants = [f'rush_trader_{i}' for i in range(self.num_participants)]
-        logging.debug(f"Initializing {len(self.participants)} participants")
-
-        for participant in self.participants:
-            try:
-                self.market.deposit(participant, 'cash', Decimal('100000000'))
-                self.market.deposit(participant, self.security_id, Decimal('1000000'))
-            except Exception as e:
-                self.logger.error(f"Error funding participant {participant}: {str(e)}")
 
     def get_stats(self) -> Dict:
         """Get current simulation statistics"""
