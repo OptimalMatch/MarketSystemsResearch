@@ -1,4 +1,35 @@
+# Market Systems Research
 [![Watch the demo video](docs/images/screenshot_home.png)](https://youtu.be/dc28jhKj8og?hd=1 "Demo")
+
+## Installation and Running
+1. Clone this repository
+
+2. Set up Python environment:
+```bash
+# Install pyenv if you haven't already
+brew install pyenv  # On macOS
+# Or visit https://github.com/pyenv/pyenv#installation for other platforms
+
+# Install Python 3.9+ using pyenv
+pyenv install 3.9.0
+pyenv local 3.9.0
+
+# Create and activate virtual environment
+python -m venv venv
+source venv/bin/activate  # On Unix/macOS
+# Or `venv\Scripts\activate` on Windows
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+3. Run the visualization server:
+```bash
+python VisualServer.py
+```
+
+4. Open your browser to [http://localhost:8084/](http://localhost:8084/)
+
 
 # Exchange System Design Document
 
