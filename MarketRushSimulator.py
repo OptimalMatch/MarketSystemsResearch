@@ -293,15 +293,13 @@ class MarketRushSimulator:
             return False
 
         try:
-            # Use cached market depth instead of querying again
-            current_price = self.last_trade_price
-            if self.cached_depth['asks']:
-                current_price = self.cached_depth['asks'][0]['price']
-            elif self.cached_depth['bids']:
-                current_price = self.cached_depth['bids'][0]['price']
-
-            # Get pre-calculated values from pools
-            participant = self._get_next_participant()
+            # Get a random participant
+            participant = random.choice(self.participants)
+            
+            # Get the current price
+            current_price = self.last_trade_price if self.last_trade_price else Decimal('100.0')
+            
+            # Generate price movement
             base_increment = self._get_next_price_increment()
             order_size = self._get_next_order_size()
             
@@ -324,8 +322,8 @@ class MarketRushSimulator:
 
             # Place the order
             side = OrderSide.SELL if is_sell_order else OrderSide.BUY
-
-            # Directly place order without statistics overhead - pure speed
+            
+            # Direct placement for maximum speed
             self.market.place_order(
                 owner_id=participant,
                 security_id=self.security_id,
@@ -334,15 +332,34 @@ class MarketRushSimulator:
                 size=size
             )
 
-            # Minimal stats updates - only essential ones
+            # Essential stats for throughput tracking
             self.stats['total_orders'] += 1
             self.stats['successful_orders'] += 1
+            
+            # Essential wave pattern management
             self.orders_in_current_wave += 1
-
-            # Only update wave pattern when needed (less frequently)
             if self.orders_in_current_wave >= wave_orders:
                 self.current_wave = (self.current_wave + 1) % len(self.wave_patterns)
                 self.orders_in_current_wave = 0
+            
+            # Key price stats (updated less frequently to reduce overhead)
+            # Only update these stats every 100 orders to minimize overhead
+            if self.stats['total_orders'] % 100 == 0:
+                self.stats['current_price'] = price
+                
+                # Calculate volume and highest price periodically
+                if 'volume' in self.stats:
+                    self.stats['volume'] += (size * 100)  # Estimate for missed orders
+                
+                if 'highest_price' in self.stats:
+                    self.stats['highest_price'] = max(self.stats['highest_price'], price)
+                
+                # Only calculate price movement occasionally (expensive)
+                if 'start_price' in self.stats and self.stats['start_price'] > 0:
+                    self.stats['price_movement_percent'] = (
+                        (self.stats['current_price'] - self.stats['start_price']) /
+                        self.stats['start_price'] * Decimal('100')
+                    )
 
             return True
 
