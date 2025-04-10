@@ -4,7 +4,7 @@ import random
 import time
 from typing import List, Dict
 import logging
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 import multiprocessing
 import queue
 from datetime import datetime
@@ -32,8 +32,8 @@ class MarketRushSimulator:
         self.logger = logging.getLogger(__name__)
         self.price_queue = queue.Queue()
         self.executor = None
-        self.batch_size = 200  # Increased from 100
-        self.worker_threads = 200  # Increased from 100
+        self.batch_size = 2000  # Increased for higher utilization of 30 CPUs
+        self.worker_threads = 1000  # Increased for higher throughput
         self.batch_delay = 0.0001  # Minimal delay for maximum throughput
         self.min_price_increment = Decimal('0.05')  # 5 cents minimum
         self.max_price_increment = Decimal('0.25')  # 25 cents maximum
@@ -109,11 +109,13 @@ class MarketRushSimulator:
         
         # Get available CPU cores
         cpu_count = multiprocessing.cpu_count()
-        self.logger.info(f"Using {cpu_count} CPU cores for processing")
-
-        # Initialize multiprocessing for CPU-bound tasks
-        # Use ThreadPoolExecutor for I/O bound tasks (like order placement)
-        self.executor = ThreadPoolExecutor(max_workers=self.worker_threads)
+        self.logger.info(f"Available CPUs: {cpu_count} - Will utilize all available cores")
+        
+        # Keep ThreadPoolExecutor for I/O bound operations
+        # Using double the CPU count for worker threads to ensure CPU saturation
+        thread_workers = max(self.worker_threads, cpu_count * 20)
+        self.executor = ThreadPoolExecutor(max_workers=thread_workers)
+        self.logger.info(f"Using {thread_workers} worker threads for concurrent processing")
 
         # Start simulation thread
         self.thread = threading.Thread(target=self._run_simulation, args=(duration_seconds,))
@@ -141,20 +143,12 @@ class MarketRushSimulator:
         last_log_time = start_time
         log_interval = 1.0  # Log every second
         
-        # Create parallel processing workers
+        # Create optimized thread distribution
         cpu_count = multiprocessing.cpu_count()
-        batch_per_cpu = max(1, self.batch_size // cpu_count)
+        max_batches = cpu_count * 4  # Create more batches than CPUs to keep them busy
+        orders_per_batch = max(50, self.batch_size // max_batches)
+        self.logger.info(f"Running with {max_batches} concurrent batches, {orders_per_batch} orders per batch")
         
-        # Divide work into chunks for better CPU utilization
-        def process_order_batch(batch_start, batch_end):
-            results = []
-            for _ in range(batch_start, batch_end):
-                if not self.is_running:
-                    break
-                result = self._place_rush_order()
-                results.append(result)
-            return results
-
         try:
             while time.time() < end_time and self.is_running:
                 # Update market depth cache if needed
@@ -169,34 +163,25 @@ class MarketRushSimulator:
                     except Exception as e:
                         self.logger.error(f"Error getting market depth: {str(e)}")
 
-                # Submit batches divided by CPU cores
+                # Create many small batches of work to saturate all CPUs
                 futures = []
-                for i in range(0, cpu_count):
-                    batch_start = i * batch_per_cpu
-                    batch_end = min((i + 1) * batch_per_cpu, self.batch_size)
-                    if batch_end > batch_start:
-                        future = self.executor.submit(process_order_batch, batch_start, batch_end)
-                        futures.append(future)
-
-                # Process completed batches
-                completed_results = []
+                for _ in range(max_batches):
+                    future = self.executor.submit(self._process_order_batch, orders_per_batch)
+                    futures.append(future)
+                
+                # Process all batches
+                successful_orders = 0
                 for future in futures:
-                    if not self.is_running:
-                        break
                     try:
-                        results = future.result(timeout=1.0)
-                        completed_results.extend(results)
+                        batch_success = future.result(timeout=0.5)
+                        successful_orders += batch_success
                     except Exception as e:
                         self.logger.error(f"Error processing batch: {str(e)}")
-
+                
                 # Update statistics
-                successes = sum(1 for result in completed_results if result)
-                orders_placed += successes
-                trades_executed += successes
-                self.stats['successful_orders'] += successes
-                self.stats['failed_orders'] += (len(completed_results) - successes)
-                self.stats['total_orders'] += len(completed_results)
-
+                orders_placed += successful_orders
+                trades_executed += successful_orders
+                
                 # Log performance metrics periodically
                 current_time = time.time()
                 if current_time - last_log_time >= log_interval:
@@ -204,21 +189,87 @@ class MarketRushSimulator:
                     orders_per_sec = orders_placed / elapsed_time if elapsed_time > 0 else 0
                     trades_per_sec = trades_executed / elapsed_time if elapsed_time > 0 else 0
                     memory_usage = psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024  # MB
+                    cpu_percent = psutil.cpu_percent(interval=None)
                     
                     self.logger.info("Performance Metrics:")
+                    self.logger.info(f"CPU Usage: {cpu_percent:.2f}%")
                     self.logger.info(f"Memory Usage: {memory_usage:.2f} MB")
                     self.logger.info(f"Order Throughput: {orders_per_sec:.2f} orders/sec")
                     self.logger.info(f"Trade Throughput: {trades_per_sec:.2f} trades/sec")
                     
                     last_log_time = current_time
                 
-                # Use minimal delay
+                # Allow other threads to progress
                 time.sleep(self.batch_delay)
 
         except Exception as e:
             self.logger.error(f"Simulation error: {str(e)}")
         finally:
             self.is_running = False
+            
+    def _process_order_batch(self, batch_size):
+        """Process a batch of orders and return the number of successful orders"""
+        successful = 0
+        try:
+            # Pre-generate all orders in this batch
+            for _ in range(batch_size):
+                if not self.is_running:
+                    break
+                    
+                # Get a random participant
+                participant = random.choice(self.participants)
+                
+                # Get the current price
+                current_price = self.last_trade_price if self.last_trade_price else Decimal('100.0')
+                
+                # Generate price movement
+                base_increment = self._get_next_price_increment()
+                order_size = self._get_next_order_size()
+                
+                # Use pre-calculated random values for better performance
+                is_sell_order = random.random() < 0.5
+                wave_orders, wave_multiplier = self.wave_patterns[self.current_wave]
+                
+                # Use faster float operations
+                wave_multiplier = float(wave_multiplier)
+                momentum = float(self.momentum)
+                current_price_float = float(current_price)
+                
+                price_increment = base_increment * wave_multiplier * momentum
+                if random.random() < 0.5:  # 50% chance for overlap
+                    price_increment *= -1
+
+                # Calculate final price and size
+                price = Decimal(str(current_price_float + price_increment))
+                size = Decimal(str(order_size))
+
+                # Place the order directly
+                side = OrderSide.SELL if is_sell_order else OrderSide.BUY
+                result = self.market.place_order(
+                    owner_id=participant,
+                    security_id=self.security_id,
+                    side=side,
+                    price=price,
+                    size=size
+                )
+                
+                if result:
+                    successful += 1
+                    
+                    # Update stats with minimal overhead
+                    self.stats['total_orders'] += 1
+                    self.stats['successful_orders'] += 1
+                    self.orders_in_current_wave += 1
+                    
+                    # Update wave pattern when needed
+                    if self.orders_in_current_wave >= wave_orders:
+                        self.current_wave = (self.current_wave + 1) % len(self.wave_patterns)
+                        self.orders_in_current_wave = 0
+                        
+        except Exception as e:
+            self.logger.error(f"Error in batch processing: {str(e)}")
+            
+        return successful
 
     def _refill_pools(self):
         """Pre-calculate pools of random values"""
