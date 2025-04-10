@@ -66,14 +66,20 @@ class MarketRushSimulator:
         self.initial_price = self.last_trade_price
 
         # More controlled wave patterns
+        # self.wave_patterns = [
+        #     (100, 1.0),  # Normal trading
+        #     (200, 1.2),  # Building pressure
+        #     (300, 1.5),  # Increased pressure
+        #     (200, 1.2),  # Easing
+        #     (100, 1.0)  # Back to normal
+        # ]
         self.wave_patterns = [
-            (100, 1.0),  # Normal trading
-            (200, 1.2),  # Building pressure
-            (300, 1.5),  # Increased pressure
-            (200, 1.2),  # Easing
-            (100, 1.0)  # Back to normal
+            (100, 1.0),
+            (100, 1.0),
+            (100, 1.0),
+            (100, 1.0),
+            (100, 1.0)
         ]
-
         # Momentum control
         self.momentum = Decimal('1.0')
         self.momentum_increment = Decimal('0.01')
