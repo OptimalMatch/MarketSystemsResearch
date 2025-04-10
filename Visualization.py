@@ -137,33 +137,53 @@ class Visualization:
             interval = interval or Config.CANDLESTICK_INTERVAL
             trades = self.market.orderbooks[next(iter(self.market.orderbooks))].trades
             
-            if trades:
-                current_time = int(time.time() // interval * interval)
-                last_trade = trades[-1]
-                trade_price = float(last_trade.price)
-
-                if self.candlestick_data and self.candlestick_data[-1]['time'] == current_time:
-                    # Update the last candle
-                    candle = self.candlestick_data[-1]
-                    candle['security_id'] = last_trade.security_id
-                    candle['high'] = max(candle['high'], trade_price)
-                    candle['low'] = min(candle['low'], trade_price)
-                    candle['close'] = trade_price
-                else:
-                    # Create a new candle
-                    self.candlestick_data.append({
-                        'security_id': last_trade.security_id,
-                        'time': current_time,
-                        'open': trade_price,
-                        'high': trade_price,
-                        'low': trade_price,
-                        'close': trade_price
-                    })
-
-                # Emit updated candlestick data
-                self.socketio.emit("candlestick", self.candlestick_data[-100:])  # Send last 100 candles
+            if not trades:
+                return
                 
-                # Update and emit moving averages
+            current_time = int(time.time() // interval * interval)
+            last_trade = trades[-1]
+            trade_price = float(last_trade.price)
+            
+            # Check if we need to create a new candle or update existing one
+            new_candle = False
+            if not self.candlestick_data or self.candlestick_data[-1]['time'] != current_time:
+                # Create a new candle
+                new_candle = True
+                self.candlestick_data.append({
+                    'security_id': last_trade.security_id,
+                    'time': current_time,
+                    'open': trade_price,
+                    'high': trade_price,
+                    'low': trade_price,
+                    'close': trade_price
+                })
+                # Keep only last 100 candles to prevent memory bloat
+                if len(self.candlestick_data) > 100:
+                    self.candlestick_data = self.candlestick_data[-100:]
+            else:
+                # Update the last candle
+                candle = self.candlestick_data[-1]
+                candle['security_id'] = last_trade.security_id
+                candle['high'] = max(candle['high'], trade_price)
+                candle['low'] = min(candle['low'], trade_price)
+                candle['close'] = trade_price
+
+            # Emit only the updated candle to reduce data transfer
+            if new_candle:
+                # For a new candle, send the last 5 candles for context
+                self.socketio.emit("candlestick_update", {
+                    'full_refresh': False,
+                    'candles': self.candlestick_data[-5:]
+                })
+            else:
+                # For an updated candle, just send the last one
+                self.socketio.emit("candlestick_update", {
+                    'full_refresh': False,
+                    'candles': [self.candlestick_data[-1]]
+                })
+            
+            # Update and emit moving averages - but less frequently
+            if new_candle:
                 self.update_band_data()
                 
         except Exception as e:

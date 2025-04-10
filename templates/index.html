@@ -249,7 +249,58 @@
             closeValue.textContent = '-';
         });
 
+        // Handle candlestick updates - optimized for performance
+        socket.on('candlestick_update', function(data) {
+            // Check if this is a full refresh or incremental update
+            if (data.full_refresh) {
+                // Replace all candlesticks
+                candlestickSeries.setData(data.candles);
+            } else {
+                // Incremental update - more efficient
+                data.candles.forEach(candle => {
+                    // Update the chart with each candle
+                    candlestickSeries.update(candle);
+                    
+                    // Update security ID if available
+                    if (candle.security_id) {
+                        securityId.textContent = candle.security_id;
+                    }
+                });
+            }
+        });
+        
+        // Initial candlestick data load
+        socket.on('candlestick', function(data) {
+            candlestickSeries.setData(data);
+            if (data && data.length > 0 && data[0].security_id) {
+                securityId.textContent = data[0].security_id;
+            }
+        });
 
+        // Order book
+        socket.on('orderbook', (data) => {
+            const orderbookDiv = document.getElementById('orderbook');
+            orderbookDiv.innerHTML = `
+                <h3>Bids</h3>
+                <ul id="orderbookbids">${data.bids.map(order => `<li>${order.price} @ ${order.size}</li>`).join('')}</ul>
+                <h3>Asks</h3>
+                <ul id="orderbookasks">${data.asks.map(order => `<li>${order.price} @ ${order.size}</li>`).join('')}</ul>
+            `;
+        });
+
+        // Maintain a local array of markers
+        const markers = [];
+
+        // Listen for new markers from the server
+        socket.on('market_maker_marker', (marker) => {
+            //console.log('Received marker:', marker);
+
+            // Add the new marker to the local array
+            markers.push(marker);
+
+            // Update the markers on the chart
+            candlestickSeries.setMarkers(markers);
+        });
 
         // Bands chart (SMA)
         const bandsChart = LightweightCharts.createChart(document.getElementById('bands-chart'), {
@@ -329,73 +380,6 @@
                 day: date.getUTCDate(),
             };
         }
-
-        // Maintain a Set to track unique times
-        //const uniqueCandlestickTimes = new Set();
-
-<!--        socket.on("candlestick", (candlestickData) => {-->
-
-<!--            // Filter out duplicate candlesticks based on their `time`-->
-<!--            const filteredData = candlestickData.filter((candle) => {-->
-<!--                if (uniqueCandlestickTimes.has(candle.time)) {-->
-<!--                    return false; // Skip duplicates-->
-<!--                }-->
-<!--                uniqueCandlestickTimes.add(candle.time);-->
-<!--                return true;-->
-<!--            });-->
-
-<!--            // Update the chart with the filtered data-->
-<!--            if (filteredData.length > 0) {-->
-<!--                console.log('Candlestick data received:', filteredData); // Debug log-->
-<!--                candlestickSeries.update(filteredData);-->
-<!--            }-->
-<!--        });-->
-
-        // Listen for candlestick updates
-        let lastCandlestickUpdate = 0;
-        const CANDLESTICK_THROTTLE_MS = 300; // Only update candlestick chart every 300ms
-        
-        socket.on('candlestick', (data) => {
-            const now = performance.now();
-            // Throttle updates to reduce browser load
-            if (now - lastCandlestickUpdate < CANDLESTICK_THROTTLE_MS) {
-                return;
-            }
-            lastCandlestickUpdate = now;
-            
-            //console.log('Candlestick data received:', data); // Debug log
-            candlestickSeries.setData(data);
-            if (data && data.length > 0 && data[0].security_id) {
-                securityId.textContent = data[0].security_id;
-            }
-        });
-
-        // Order book
-        socket.on('orderbook', (data) => {
-            const orderbookDiv = document.getElementById('orderbook');
-            orderbookDiv.innerHTML = `
-                <h3>Bids</h3>
-                <ul id="orderbookbids">${data.bids.map(order => `<li>${order.price} @ ${order.size}</li>`).join('')}</ul>
-                <h3>Asks</h3>
-                <ul id="orderbookasks">${data.asks.map(order => `<li>${order.price} @ ${order.size}</li>`).join('')}</ul>
-            `;
-        });
-
-        // Maintain a local array of markers
-        const markers = [];
-
-        // Listen for new markers from the server
-        socket.on('market_maker_marker', (marker) => {
-            //console.log('Received marker:', marker);
-
-            // Add the new marker to the local array
-            markers.push(marker);
-
-            // Update the markers on the chart
-            candlestickSeries.setMarkers(markers);
-        });
-
-
 
         let domChart = Highcharts.chart('dom-container', {
             chart: {
