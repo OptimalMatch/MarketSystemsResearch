@@ -33,7 +33,7 @@ The Exchange System is a Python-based implementation of a security trading platf
 
 The current system uses 1-2 CPU cores for order matching and trade settlement, and 1-2 CPU cores for visualization. The number of CPU cores can be adjusted in the configuration file.
 
-Out of the gate, we see 85k orders/sec and 34k trades/sec. It stabilizes at around 40k orders/sec and 20k trades/sec.  HFT systems can reach up to 100k orders/sec and 50k trades/sec.  If we separated the metrics capture further, we could reach that level.
+Out of the gate, we see 85k orders/sec and 34k trades/sec. It stabilizes at around 40k orders/sec and 20k trades/sec.  HFT systems can reach up to 100k orders/sec and 50k trades/sec for the one ticker symbol.  If we separated the metrics capture further, we could reach that level.
 
 Example Output:
 
