@@ -133,7 +133,19 @@ class OrderBook:
         self.bids: List[Order] = []
         self.asks: List[Order] = []
         self.trades: List[Trade] = []
-        self.orders: Dict[str, Order] = {}  # Track orders by ID (string)
+        self.orders: Dict[str, Order] = {}
+        
+        # Pre-allocate trade list with capacity
+        self.trade_buffer_size = 1000
+        self.trade_buffer = []
+        
+        # Use sorted lists for price levels
+        self.bid_prices = []  # Sorted descending
+        self.ask_prices = []  # Sorted ascending
+        
+        # Add order count tracking
+        self.order_count = 0
+        self.trade_count = 0
 
     def add_order(self, order: Order) -> List[Trade]:
         """Add an order and return any resulting trades"""
@@ -164,9 +176,9 @@ class OrderBook:
 
         order = self.orders[order_id]
         if order.side == OrderSide.BUY:
-            self.bids = [o for o in self.bids if o.id != order_id]
+            self._remove_bid(order)
         else:
-            self.asks = [o for o in self.asks if o.id != order_id]
+            self._remove_ask(order)
 
         order.status = 'cancelled'
         return True
@@ -196,27 +208,28 @@ class OrderBook:
         return None
 
     def _match_order(self, order: Order) -> List[Trade]:
-        trades = []
-        logging.debug(f"Matching order: {order}")
-
+        """Match order using pre-allocated trade buffer"""
+        self.trade_buffer.clear()
+        order_price = float(order.price)
+        
         while True:
             match = None
-            # Use references to avoid repeated list indexing
-            if order.side == OrderSide.BUY and self.asks and self.asks[0].price <= order.price:
+            if order.side == OrderSide.BUY and self.asks:
                 match = self.asks[0]
-            elif order.side == OrderSide.SELL and self.bids and self.bids[0].price >= order.price:
+                if float(match.price) > order_price:
+                    break
+            elif order.side == OrderSide.SELL and self.bids:
                 match = self.bids[0]
-
+                if float(match.price) < order_price:
+                    break
+            
             if not match:
-                logging.debug(f"No match found for order: {order}")
                 break
 
             # Calculate trade size
-            remaining_size = order.size - order.filled
-            match_remaining = match.size - match.filled
-            trade_size = min(remaining_size, match_remaining)
+            trade_size = min(order.size - order.filled, match.size - match.filled)
 
-            # Create and record the trade
+            # Create trade and add to buffer
             trade = Trade.create(
                 security_id=self.security_id,
                 buyer_id=order.owner_id if order.side == OrderSide.BUY else match.owner_id,
@@ -224,61 +237,122 @@ class OrderBook:
                 price=match.price,
                 size=trade_size
             )
-            trades.append(trade)
+            self.trade_buffer.append(trade)
             self.trades.append(trade)
-            logging.debug(f"Trade executed: {trade}")
+            self.trade_count += 1
 
-            # Update order fills
+            # Update fills
             order.filled += trade_size
             match.filled += trade_size
 
-            # Remove matched order if fully filled
-            if match.filled == match.size:
+            # Remove filled orders
+            if match.filled >= match.size:
                 if order.side == OrderSide.BUY:
                     self.asks.pop(0)
+                    if not self.asks or float(self.asks[0].price) != float(match.price):
+                        self.ask_prices.pop(0)
                 else:
                     self.bids.pop(0)
+                    if not self.bids or float(self.bids[0].price) != float(match.price):
+                        self.bid_prices.pop(0)
+                match.status = 'filled'
 
-            # Break if original order is fully filled
-            if order.filled == order.size:
+            if order.filled >= order.size:
+                order.status = 'filled'
                 break
 
-        return trades
+        return self.trade_buffer
 
     def _add_bid(self, order: Order):
         """Add bid order maintaining price-time priority (highest price first)"""
-        insert_index = len(self.bids)
-        for i, bid in enumerate(self.bids):
-            if order.price > bid.price:
-                insert_index = i
-                break
-        self.bids.insert(insert_index, order)
+        # Binary search for insertion point
+        price = float(order.price)  # Convert to float for faster comparisons
+        pos = self._binary_search_bids(price)
+        self.bids.insert(pos, order)
+        
+        # Update price levels if needed
+        if not self.bid_prices or price != self.bid_prices[-1]:
+            pos = self._binary_search_prices(self.bid_prices, price, reverse=True)
+            self.bid_prices.insert(pos, price)
 
     def _add_ask(self, order: Order):
         """Add ask order maintaining price-time priority (lowest price first)"""
-        insert_index = len(self.asks)
-        for i, ask in enumerate(self.asks):
-            if order.price < ask.price:
-                insert_index = i
-                break
-        self.asks.insert(insert_index, order)
+        # Binary search for insertion point
+        price = float(order.price)  # Convert to float for faster comparisons
+        pos = self._binary_search_asks(price)
+        self.asks.insert(pos, order)
+        
+        # Update price levels if needed
+        if not self.ask_prices or price != self.ask_prices[-1]:
+            pos = self._binary_search_prices(self.ask_prices, price)
+            self.ask_prices.insert(pos, price)
 
-    def cancel_order(self, order_id: str) -> bool:
-        """Cancel an order by ID"""
-        # Convert order_id to string if it isn't already
-        order_id = str(order_id)
+    def _binary_search_bids(self, price: float) -> int:
+        """Binary search for bid insertion point (descending order)"""
+        left, right = 0, len(self.bids)
+        while left < right:
+            mid = (left + right) // 2
+            if float(self.bids[mid].price) < price:
+                right = mid
+            else:
+                left = mid + 1
+        return left
 
-        if order_id not in self.orders:
-            return False
+    def _binary_search_asks(self, price: float) -> int:
+        """Binary search for ask insertion point (ascending order)"""
+        left, right = 0, len(self.asks)
+        while left < right:
+            mid = (left + right) // 2
+            if float(self.asks[mid].price) > price:
+                right = mid
+            else:
+                left = mid + 1
+        return left
 
-        order = self.orders[order_id]
-        if order.side == OrderSide.BUY:
-            self.bids = [o for o in self.bids if str(o.id) != order_id]
-        else:
-            self.asks = [o for o in self.asks if str(o.id) != order_id]
+    def _binary_search_prices(self, prices: List[float], price: float, reverse: bool = False) -> int:
+        """Binary search for price level insertion point"""
+        left, right = 0, len(prices)
+        while left < right:
+            mid = (left + right) // 2
+            if (prices[mid] < price) != reverse:
+                right = mid
+            else:
+                left = mid + 1
+        return left
 
-        order.status = 'cancelled'
-        return True
+    def _remove_bid(self, order: Order):
+        """Remove a bid order efficiently using index tracking"""
+        if order.id in self.orders:
+            price = float(order.price)
+            
+            # Binary search to find and remove order
+            pos = self._binary_search_bids(price)
+            while pos < len(self.bids) and float(self.bids[pos].price) == price:
+                if self.bids[pos].id == order.id:
+                    self.bids.pop(pos)
+                    # Update price levels if needed
+                    if not any(float(o.price) == price for o in self.bids):
+                        pos = self._binary_search_prices(self.bid_prices, price, reverse=True)
+                        self.bid_prices.pop(pos)
+                    break
+                pos += 1
+
+    def _remove_ask(self, order: Order):
+        """Remove an ask order efficiently using index tracking"""
+        if order.id in self.orders:
+            price = float(order.price)
+            
+            # Binary search to find and remove order
+            pos = self._binary_search_asks(price)
+            while pos < len(self.asks) and float(self.asks[pos].price) == price:
+                if self.asks[pos].id == order.id:
+                    self.asks.pop(pos)
+                    # Update price levels if needed
+                    if not any(float(o.price) == price for o in self.asks):
+                        pos = self._binary_search_prices(self.ask_prices, price)
+                        self.ask_prices.pop(pos)
+                    break
+                pos += 1
 
 # Market implementation
 class Market:
