@@ -51,6 +51,17 @@
 </head>
 <body>
 
+    <!-- Loading progress bar (hidden by default) -->
+    <div id="loading-container" style="display: none; margin-bottom: 20px; width: 100%; border: 1px solid #ddd; padding: 10px; border-radius: 5px; background-color: #f9f9f9;">
+        <h3 style="margin-top: 0; color: #333;">Loading CSV File</h3>
+        <div style="display: flex; align-items: center; margin-bottom: 5px;">
+            <div id="loading-message" style="flex-grow: 1; font-weight: bold;">Loading...</div>
+            <div id="loading-percentage" style="font-weight: bold;">0%</div>
+        </div>
+        <div class="progress-bar-container" style="width: 100%; background-color: #f0f0f0; border-radius: 4px; height: 20px; overflow: hidden; box-shadow: inset 0 1px 3px rgba(0,0,0,0.2);">
+            <div id="loading-progress-bar" style="width: 0%; height: 100%; background-color: #4CAF50; transition: width 0.3s;"></div>
+        </div>
+    </div>
     
 <div id="replay-controls" style="padding: 10px; background-color: #333; color: white; margin-bottom: 10px;">
     <h3>Trade Log Replay</h3>
@@ -60,7 +71,7 @@
         <button id="stop-btn" class="control-btn">Stop</button>
         <div style="margin-left: 20px;">
             <label for="speed-slider">Speed: <span id="speed-value">1x</span></label>
-            <input type="range" id="speed-slider" min="0.1" max="10" step="0.1" value="1">
+            <input type="range" id="speed-slider" min="1" max="10000" step="0.1" value="1">
         </div>
         <div style="margin-left: 20px; flex-grow: 1;">
             <label for="position-slider">Position: <span id="position-value">0/0</span></label>
@@ -573,8 +584,40 @@
             return undefined;
         }
 
+        // Loading status handler
+        socket.on('loading_status', function(data) {
+            console.log('Loading status:', data);
+            const loadingContainer = document.getElementById('loading-container');
+            const loadingProgressBar = document.getElementById('loading-progress-bar');
+            const loadingMessage = document.getElementById('loading-message');
+            const loadingPercentage = document.getElementById('loading-percentage');
+            
+            // Show loading container
+            loadingContainer.style.display = 'block';
+            
+            // Update progress bar
+            if (data.progress !== undefined) {
+                loadingProgressBar.style.width = `${data.progress}%`;
+                loadingPercentage.textContent = `${data.progress}%`;
+            }
+            
+            // Update message
+            if (data.message) {
+                loadingMessage.textContent = data.message;
+            }
+            
+            // Handle completion
+            if (data.status === 'complete') {
+                // Hide after a short delay to ensure the user sees 100%
+                setTimeout(() => {
+                    loadingContainer.style.display = 'none';
+                }, 2000);
+            } else if (data.status === 'error') {
+                // Change color to red for errors
+                loadingProgressBar.style.backgroundColor = '#f44336';
+            }
+        });
 
-    
 // Replay controls
 const playBtn = document.getElementById('play-btn');
 const pauseBtn = document.getElementById('pause-btn');
@@ -583,7 +626,7 @@ const speedSlider = document.getElementById('speed-slider');
 const speedValue = document.getElementById('speed-value');
 const positionSlider = document.getElementById('position-slider');
 const positionValue = document.getElementById('position-value');
-const filename = document.getElementById('filename');
+const filenameElement = document.getElementById('filename');
 
 // Event listeners
 playBtn.addEventListener('click', () => {
@@ -600,8 +643,51 @@ stopBtn.addEventListener('click', () => {
 
 speedSlider.addEventListener('input', () => {
     const speed = parseFloat(speedSlider.value);
-    speedValue.textContent = speed.toFixed(1) + 'x';
-    socket.emit('replay_command', { action: 'set_speed', speed: speed });
+    speedValue.textContent = `${speed}x`;
+    
+    // Send speed command to server
+    socket.emit('replay_command', {
+        action: 'set_speed',
+        speed: speed
+    });
+    
+    // TURBO MODE: For extreme speeds (>100,000x), tell the server to jump ahead
+    if (speed > 100000) {
+        const totalTrades = parseInt(positionSlider.max || 0);
+        if (totalTrades > 0) {
+            // Calculate a jump target based on speed
+            // Higher speeds = bigger jumps
+            let jumpPercentage = 0;
+            
+            if (speed >= 900000) {
+                // Near max speed: jump to 95% completion
+                jumpPercentage = 0.95;
+            } else if (speed >= 500000) {
+                // Very high speed: jump to 80% completion
+                jumpPercentage = 0.8;
+            } else if (speed >= 200000) {
+                // High speed: jump to 60% completion
+                jumpPercentage = 0.6;
+            } else {
+                // Medium-high speed: jump to 40% completion
+                jumpPercentage = 0.4;
+            }
+            
+            // Calculate position to jump to
+            const currentPosition = parseInt(positionSlider.value || 0);
+            const remainingTrades = totalTrades - currentPosition;
+            const jumpSize = Math.round(remainingTrades * jumpPercentage);
+            const targetPosition = currentPosition + jumpSize;
+            
+            console.log(`TURBO JUMP: Speed ${speed}x - Jumping from ${currentPosition} to ${targetPosition} (${jumpPercentage*100}% of remaining)`);
+            
+            // Tell server to jump to this position
+            socket.emit('replay_command', {
+                action: 'set_position',
+                position: targetPosition
+            });
+        }
+    }
 });
 
 positionSlider.addEventListener('change', () => {
@@ -611,6 +697,7 @@ positionSlider.addEventListener('change', () => {
 
 // Handle replay status updates
 socket.on('replay_status', (status) => {
+    console.log('Replay status:', status);
     // Update UI
     playBtn.disabled = status.running && !status.paused;
     pauseBtn.disabled = !status.running || status.paused;
@@ -629,10 +716,37 @@ socket.on('replay_status', (status) => {
     
     // Update filename
     if (status.filename) {
-        filename.textContent = status.filename;
+        filenameElement.textContent = status.filename;
     }
 });
 
+// Position updates
+socket.on('position_update', (data) => {
+    console.log('Position update:', data);
+    positionSlider.max = data.total;
+    positionSlider.value = data.position;
+    positionValue.textContent = `${data.position}/${data.total}`;
+});
+
+// File info updates
+socket.on('file_info', (data) => {
+    console.log('File info:', data);
+    if (data.filename) {
+        filenameElement.textContent = data.filename;
+    }
+    if (data.total_trades) {
+        // Update position slider max
+        positionSlider.max = data.total_trades;
+        positionValue.textContent = `0/${data.total_trades}`;
+    }
+});
+
+// Speed updates
+socket.on('speed_update', (data) => {
+    console.log('Speed update:', data);
+    speedSlider.value = data.speed;
+    speedValue.textContent = `${data.speed}x`;
+});
     </script>
 </body>
 </html>
