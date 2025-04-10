@@ -7,6 +7,9 @@ from decimal import Decimal
 from flask_cors import CORS
 import os
 import logging
+import datetime
+import csv
+from pathlib import Path
 
 from config import Config
 from logger import setup_logger
@@ -39,7 +42,16 @@ class Visualization:
         )
         self.server_thread = None
         self.max_markers = Config.MAX_MARKERS
-
+        
+        # For trade export
+        self.export_trades = Config.EXPORT_TRADES
+        self.trade_log_dir = Config.TRADE_LOG_DIR
+        self.trade_log_file = None
+        self.trade_writer = None
+        
+        if self.export_trades:
+            self._setup_trade_export()
+        
         # Configure Flask routes
         self._setup_routes()
         logger.info("Visualization initialized")
@@ -215,6 +227,10 @@ class Visualization:
     def emit_trade(self, trade):
         """Emit individual trade data."""
         self.socketio.emit('trade', trade)
+        
+        # Export the trade if enabled
+        if self.export_trades:
+            self.export_trade(trade)
 
     def emit_aggregated_trade(self, aggregated_trade):
         """Emit aggregated trade data."""
@@ -264,3 +280,47 @@ class Visualization:
                     logger.info(f"Updated SMA data with {len(sma_values)} points")
         except Exception as e:
             logger.error(f"Error updating band data: {str(e)}")
+
+    def _setup_trade_export(self):
+        """Set up CSV file for exporting trades."""
+        try:
+            # Create logs directory if it doesn't exist
+            Path(self.trade_log_dir).mkdir(parents=True, exist_ok=True)
+            
+            # Create a timestamped filename
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.trade_log_file = Path(self.trade_log_dir) / f"trade_log_{timestamp}.csv"
+            
+            # Open the file and write the header
+            csvfile = open(self.trade_log_file, 'w', newline='')
+            self.trade_writer = csv.writer(csvfile)
+            self.trade_writer.writerow([
+                "Trade ID", "Security ID", "Buyer ID", "Seller ID", 
+                "Price", "Size", "Timestamp"
+            ])
+            logger.info(f"Trade export enabled. Writing to {self.trade_log_file}")
+        except Exception as e:
+            logger.error(f"Failed to set up trade export: {str(e)}")
+            self.export_trades = False
+            
+    def export_trade(self, trade):
+        """Export a trade to the CSV file."""
+        if not self.export_trades or self.trade_writer is None:
+            return
+            
+        try:
+            timestamp = datetime.datetime.fromtimestamp(
+                trade.get('timestamp', time.time())
+            ).isoformat()
+            
+            self.trade_writer.writerow([
+                trade.get('id', ''),
+                trade.get('security_id', ''),
+                trade.get('buyer_id', ''),
+                trade.get('seller_id', ''),
+                trade.get('price', 0),
+                trade.get('size', 0),
+                timestamp
+            ])
+        except Exception as e:
+            logger.error(f"Error exporting trade: {str(e)}")

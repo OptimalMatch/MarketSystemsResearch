@@ -30,3 +30,7 @@ class Config:
     # Logging settings
     LOG_LEVEL = 'INFO'
     LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    
+    # Trade export settings
+    EXPORT_TRADES = False  # Set to True to enable trade log export
+    TRADE_LOG_DIR = "logs"  # Directory to store trade logs

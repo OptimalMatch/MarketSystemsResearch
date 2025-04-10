@@ -362,4 +362,57 @@ flowchart TD
     R --> S[Log Final Stats and Exit]
 ```
 
+## 9. Trade Log Replayer
+
+The Trade Log Replayer is a tool for streaming historical trade logs to the visualization frontend. This allows you to analyze past trading sessions without having to re-run the simulation.
+
+### 9.1 Features
+
+- Replay historical trade logs through the existing visualization interface
+- Control playback speed (slower or faster than real-time)
+- Pause, resume, and seek to specific positions in the replay
+- View candlestick, volume, and depth of market visualizations for historical data
+
+### 9.2 Usage
+
+1. Prepare a CSV trade log file with the following columns:
+   - Trade ID: Unique identifier for each trade
+   - Security ID: Identifier for the security (e.g., BTC-USD)
+   - Buyer ID: Identifier for the buyer
+   - Seller ID: Identifier for the seller
+   - Price: Execution price
+   - Size: Trade size/quantity
+   - Timestamp: ISO format timestamp (YYYY-MM-DDTHH:MM:SS)
+
+2. Run the Trade Log Replayer:
+```bash
+python TradeLogReplayer.py path/to/your/trade_log.csv
+```
+
+3. Optional parameters:
+```bash
+python TradeLogReplayer.py path/to/your/trade_log.csv --speed 2.0 --port 8085
+```
+   - `--speed` or `-s`: Replay speed multiplier (default: 1.0 = real-time)
+   - `--port` or `-p`: Web server port (default: 8084)
+
+4. Open your browser to the displayed URL (default: http://localhost:8084/)
+
+5. Use the replay controls at the top of the page to:
+   - Play/Pause the replay
+   - Adjust replay speed
+   - Seek to specific positions in the trade log
+
+### 9.3 Sample Trade Log
+
+A sample trade log file (`sample_trade_log.csv`) is provided for testing the replayer:
+
+```bash
+python TradeLogReplayer.py sample_trade_log.csv
+```
+
+### 9.4 Exporting Trade Logs
+
+Trade logs can be exported from a live trading session by enabling the `EXPORT_TRADES` option in `config.py`. Exported trade logs are saved to the `logs` directory with a timestamp.
+
 All Rights Reserved - Unidatum Integrated Products LLC

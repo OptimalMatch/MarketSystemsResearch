@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Trading Visualization</title>
+    <!--<script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>-->
+    <script src="/static/js/lightweight-charts@4.2.3/lightweight-charts.standalone.production.js"></script>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script src="https://code.highcharts.com/highcharts.js"></script>
+    <script src="https://code.highcharts.com/modules/accessibility.js"></script>
+    <style>
+    @media (prefers-color-scheme: dark) {
+        #candlestick-chart, #bands-chart, #trade-chart {
+            width: 100%;
+            height: 400px;
+
+        }
+        #orderbook {
+            width: 100%;
+            height: 500px;
+            overflow: auto;
+        }
+        .row {
+          display: flex;
+        }
+
+        .column {
+          flex: 50%;
+        }
+
+        body {
+            background-color: black;
+            color: white;
+        }
+
+        #orderbookbids {
+            color: #18a856;
+            font-family: sans-serif;
+        }
+
+        #orderbookasks {
+            color: #a86e18;
+            font-family: sans-serif;
+        }
+
+        .title {
+            font-family: Courier, monospace;
+        }
+    }
+    </style>
+</head>
+<body>
+
+    
+<div id="replay-controls" style="padding: 10px; background-color: #333; color: white; margin-bottom: 10px;">
+    <h3>Trade Log Replay</h3>
+    <div style="display: flex; align-items: center;">
+        <button id="play-btn" class="control-btn">Play</button>
+        <button id="pause-btn" class="control-btn">Pause</button>
+        <button id="stop-btn" class="control-btn">Stop</button>
+        <div style="margin-left: 20px;">
+            <label for="speed-slider">Speed: <span id="speed-value">1x</span></label>
+            <input type="range" id="speed-slider" min="0.1" max="10" step="0.1" value="1">
+        </div>
+        <div style="margin-left: 20px; flex-grow: 1;">
+            <label for="position-slider">Position: <span id="position-value">0/0</span></label>
+            <input type="range" id="position-slider" min="0" max="100" value="0" style="width: 100%;">
+        </div>
+        <div style="margin-left: 20px;">
+            <span id="filename">No file loaded</span>
+        </div>
+    </div>
+</div>
+
+<style>
+    .control-btn {
+        padding: 5px 15px;
+        margin-right: 5px;
+        background-color: #4CAF50;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+    }
+    .control-btn:hover {
+        background-color: #45a049;
+    }
+</style>
+    <div class="row">
+        <div class="column">
+            <h2 class="title">Depth of Market Chart</h2>
+            <div id="dom-container" style="height: 400px; width: 1000px; margin: 1rem 0;"></div>
+        </div>
+        <div class="column">
+            <h2 class="title">Order Book</h2>
+            <div id="orderbook"></div>
+        </div>
+    </div>
+    <div class="row">
+        <div class="column">
+            <h2 class="title">Candlestick Chart</h2>
+            <div id="candlestick-chart"></div>
+            <div id="candlestick-legend" style="
+                position: absolute;
+                top: 660px;
+                left: 10px;
+                z-index: 1;
+                font-size: 24px;
+                font-family: sans-serif;
+                line-height: 28px;
+                font-weight: 300;
+                background: rgba(73, 73, 74, 0.8); /* Add transparency */
+                padding: 5px;
+                border-radius: 5px;
+                box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            ">
+                <span id="security-id">-</span><br/>
+                <strong>Open:</strong> <span id="open-value">-</span><br/>
+                <strong>High:</strong> <span id="high-value">-</span><br/>
+                <strong>Low:</strong> <span id="low-value">-</span><br/>
+                <strong>Close:</strong> <span id="close-value">-</span>
+            </div>
+        </div>
+        <div class="column">
+            <h2 class="title">Volume of Trades Chart</h2>
+            <div id="trade-chart"></div>
+        </div>
+    </div>
+
+
+    <h2 class="title">Moving Averages (Bands)</h2>
+    <div id="bands-chart"></div>
+    <div id="bands-legend" style="
+        position: absolute;
+        top: 1120px;
+        left: 10px;
+        z-index: 1;
+        font-size: 24px;
+        font-family: sans-serif;
+        line-height: 28px;
+        font-weight: 300;
+        background: rgba(73, 73, 74, 0.8); /* Add transparency */
+        padding: 5px;
+        border-radius: 5px;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    ">
+        <strong>Time:</strong> <span id="band-time">-</span><br/>
+        <strong>SMA:</strong> <span id="sma-value">-</span>
+    </div>
+
+    <div id="connection-status" style="position: absolute; top: 10px; right: 10px; font-size: 18px;"></div>
+
+    <script>
+        const socketOptions = {
+            reconnection: true,
+            reconnectionAttempts: 10,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            timeout: 20000,
+            autoConnect: true
+        };
+        
+        const socket = io(socketOptions);
+        
+        // Socket connection event handlers
+        socket.on('connect', function() {
+            console.log('Connected to server');
+            document.getElementById('connection-status').textContent = 'Connected';
+            document.getElementById('connection-status').style.color = 'green';
+        });
+        
+        socket.on('disconnect', function() {
+            console.log('Disconnected from server');
+            document.getElementById('connection-status').textContent = 'Disconnected';
+            document.getElementById('connection-status').style.color = 'red';
+        });
+        
+        socket.on('connect_error', function(error) {
+            console.log('Connection error:', error);
+            document.getElementById('connection-status').textContent = 'Connection Error';
+            document.getElementById('connection-status').style.color = 'red';
+        });
+
+        var security_id = "";
+
+        // Define variables for DOM elements
+        const securityId = document.getElementById('security-id');
+
+        // Trade chart
+        const tradeChart = LightweightCharts.createChart(document.getElementById('trade-chart'), {
+            width: 800,
+            height: 400,
+            timeScale: {
+                timeVisible: true,
+                secondsVisible: true,
+            },
+            layout: { textColor: 'white', background: { type: 'solid', color: 'black' } }
+        });
+        const tradeSeries = tradeChart.addHistogramSeries({
+            color: '#26a69a',
+            priceFormat: {
+                type: 'volume',
+            },
+            priceScaleId: 'volume',
+            scaleMargins: {
+                top: 0.8,
+                bottom: 0,
+            }
+        });
+
+        // Listen for aggregated trades and update the chart
+        const aggregatedTradeData = [];
+
+        socket.on('aggregated_trade', (aggregatedTrade) => {
+            //console.log('Received aggregated trade:', aggregatedTrade);
+
+            // Validate data
+            if (!aggregatedTrade.time || !aggregatedTrade.total_volume) {
+                console.warn('Invalid trade data:', aggregatedTrade);
+                return;
+            }
+
+            // Find existing entry for the same time
+            const existingIndex = aggregatedTradeData.findIndex((data) => data.time === aggregatedTrade.time);
+
+            if (existingIndex !== -1) {
+                // Update existing entry
+                aggregatedTradeData[existingIndex].value += aggregatedTrade.total_volume;
+            } else {
+                // Add new entry
+                aggregatedTradeData.push({
+                    time: aggregatedTrade.time,
+                    value: aggregatedTrade.total_volume,
+                });
+            }
+
+            // Sort the data by time to ensure chart updates correctly
+            aggregatedTradeData.sort((a, b) => a.time - b.time);
+
+            // Update the chart
+            tradeSeries.setData(aggregatedTradeData);
+        });
+
+        // Candlestick chart
+        const candlestickChart = LightweightCharts.createChart(document.getElementById('candlestick-chart'), {
+            width: 800,
+            height: 400,
+            timeScale: {
+                timeVisible: true,
+                secondsVisible: true, // Show seconds if timestamps have small intervals
+            },
+            layout: { textColor: 'white', background: { type: 'solid', color: 'black' } }
+        });
+        const candlestickSeries = candlestickChart.addCandlestickSeries();
+
+        // Legend for candlestick chart
+        const openValue = document.getElementById('open-value');
+        const highValue = document.getElementById('high-value');
+        const lowValue = document.getElementById('low-value');
+        const closeValue = document.getElementById('close-value');
+
+        securityId.textContent = security_id;
+
+        candlestickChart.subscribeCrosshairMove((param) => {
+            //console.log('Crosshair param:', param); // Debug log
+            if (param && param.time && param.seriesData) {
+                // Retrieve the data for candlestickSeries from seriesData
+                const data = param.seriesData.get(candlestickSeries);
+
+                if (data) {
+
+                    openValue.textContent = data.open.toFixed(2); // Display the Open price
+                    highValue.textContent = data.high.toFixed(2); // Display the High price
+                    lowValue.textContent = data.low.toFixed(2);   // Display the Low price
+                    closeValue.textContent = data.close.toFixed(2); // Display the Close price
+                    return;
+                }
+            }
+
+            // Reset legend when no valid data is found
+            securityId.textContent = security_id;
+            openValue.textContent = '-';
+            highValue.textContent = '-';
+            lowValue.textContent = '-';
+            closeValue.textContent = '-';
+        });
+
+        // Handle candlestick updates - optimized for performance
+        socket.on('candlestick_update', function(data) {
+            // Check if this is a full refresh or incremental update
+            if (data.full_refresh) {
+                // Replace all candlesticks
+                candlestickSeries.setData(data.candles);
+            } else {
+                // Incremental update - more efficient
+                data.candles.forEach(candle => {
+                    // Update the chart with each candle
+                    candlestickSeries.update(candle);
+                    
+                    // Update security ID if available
+                    if (candle.security_id) {
+                        securityId.textContent = candle.security_id;
+                    }
+                });
+            }
+        });
+        
+        // Initial candlestick data load
+        socket.on('candlestick', function(data) {
+            candlestickSeries.setData(data);
+            if (data && data.length > 0 && data[0].security_id) {
+                securityId.textContent = data[0].security_id;
+            }
+        });
+
+        // Order book
+        socket.on('orderbook', (data) => {
+            const orderbookDiv = document.getElementById('orderbook');
+            orderbookDiv.innerHTML = `
+                <h3>Bids</h3>
+                <ul id="orderbookbids">${data.bids.map(order => `<li>${order.price} @ ${order.size}</li>`).join('')}</ul>
+                <h3>Asks</h3>
+                <ul id="orderbookasks">${data.asks.map(order => `<li>${order.price} @ ${order.size}</li>`).join('')}</ul>
+            `;
+        });
+
+        // Maintain a local array of markers
+        const markers = [];
+
+        // Listen for new markers from the server
+        socket.on('market_maker_marker', (marker) => {
+            //console.log('Received marker:', marker);
+
+            // Add the new marker to the local array
+            markers.push(marker);
+
+            // Update the markers on the chart
+            candlestickSeries.setMarkers(markers);
+        });
+
+        // Bands chart (SMA)
+        const bandsChart = LightweightCharts.createChart(document.getElementById('bands-chart'), {
+            width: 800,
+            height: 400,
+            timeScale: {
+                timeVisible: true,
+                secondsVisible: true,
+            },
+            layout: { textColor: 'white', background: { type: 'solid', color: 'black' } },
+            grid: {
+                vertLines: { color: 'rgba(70, 70, 70, 0.5)' },
+                horzLines: { color: 'rgba(70, 70, 70, 0.5)' }
+            },
+            crosshair: {
+                mode: LightweightCharts.CrosshairMode.Normal,
+                vertLine: {
+                    width: 8,
+                    color: 'rgba(224, 227, 235, 0.1)',
+                    style: 0,
+                },
+                horzLine: {
+                    width: 8,
+                    color: 'rgba(224, 227, 235, 0.1)',
+                    style: 0,
+                },
+            },
+        });
+        
+        const bandsSeries = bandsChart.addLineSeries({ 
+            color: '#a81871', 
+            lineWidth: 2,
+            title: 'SMA',
+            priceLineVisible: false,
+            lastValueVisible: true,
+        });
+
+        // Legend for bands chart
+        const bandTime = document.getElementById('band-time');
+        const smaValue = document.getElementById('sma-value');
+
+        bandsChart.subscribeCrosshairMove((param) => {
+            //console.log('Crosshair param:', param); // Debug log
+             if (param && param.time && param.seriesData) {
+                // Retrieve the data for bandsSeries from seriesData
+                const data = param.seriesData.get(bandsSeries);
+
+                if (data && data.value !== undefined) {
+                    bandTime.textContent = new Date(param.time * 1000).toISOString(); // Convert timestamp to readable format
+                    smaValue.textContent = data.value.toFixed(2); // Display the SMA value
+                    return;
+                }
+            }
+
+            // Reset legend when there's no valid data
+            bandTime.textContent = '-';
+            smaValue.textContent = '-';
+        });
+
+        // Listen for band (SMA) updates
+        socket.on('band', (data) => {
+            // console.log('Band data received:', data); // Debug log
+            if (data && data.length > 0) {
+                const formattedData = data.map(item => ({
+                    time: item.time,
+                    value: parseFloat(item.value)
+                }));
+                bandsSeries.setData(formattedData);
+            }
+        });
+
+        function convertUnixToDate(unixTime) {
+            const date = new Date(unixTime * 1000); // Convert seconds to milliseconds
+            return {
+                year: date.getUTCFullYear(),
+                month: date.getUTCMonth() + 1, // Months are 0-indexed
+                day: date.getUTCDate(),
+            };
+        }
+
+        let domChart = Highcharts.chart('dom-container', {
+            chart: {
+                type: 'area',
+                zooming: {
+                    type: 'xy'
+                },
+                backgroundColor: 'black', // Set background color to black
+            },
+            title: {
+                text: 'Depth of Market',
+                style: {
+                    color: 'white' // Set title text color to white
+                }
+            },
+            xAxis: {
+                minPadding: 0,
+                maxPadding: 0,
+                title: {
+                    text: 'Price',
+                    style: {
+                        color: 'white' // Set x-axis title text color
+                    }
+                },
+                labels: {
+                    style: {
+                        color: 'white' // Set x-axis label text color
+                    }
+                },
+                plotLines: [{
+                    color: 'white',
+                    value: 102, // Initial actual price
+                    width: 1,
+                    id: 'actualPriceLine', // Add an ID to the plot line for dynamic updates
+                    label: {
+                        text: 'Actual price',
+                        rotation: 90,
+                        style: {
+                            color: 'white'
+                        }
+                    }
+                }],
+            },
+            yAxis: [{
+                lineWidth: 1,
+                gridLineWidth: 1,
+                title: null,
+                tickWidth: 1,
+                tickLength: 5,
+                tickPosition: 'inside',
+                labels: {
+                    align: 'left',
+                    x: 8
+                }
+            }, {
+                opposite: true,
+                linkedTo: 0,
+                lineWidth: 1,
+                gridLineWidth: 0,
+                title: null,
+                tickWidth: 1,
+                tickLength: 5,
+                tickPosition: 'inside',
+                labels: {
+                    align: 'right',
+                    x: -8,
+                    style: {
+                        color: 'white' // Set y-axis label text color
+                    }
+                }
+            }],
+            legend: {
+                enabled: false
+            },
+            plotOptions: {
+                area: {
+                    fillOpacity: 0.2,
+                    lineWidth: 1,
+                    step: 'center'
+                }
+            },
+            tooltip: {
+                backgroundColor: 'gray', // Set tooltip background to gray
+                headerFormat: '<span style="font-size=10px; color:white;">Price: {point.key}</span><br/>',
+                valueDecimals: 2,
+                style: {
+                    color: 'white' // Set tooltip text color to white
+                }
+            },
+            series: [{
+                name: 'Bids',
+                data: [],
+                color: '#03a7a8'
+            }, {
+                name: 'Asks',
+                data: [],
+                color: '#fc5857'
+            }]
+        });
+
+        // DOM chart (using lightweight-charts instead of Highcharts for better performance)
+        let lastDOMUpdate = 0;
+        const DOM_THROTTLE_MS = 200; // Only update DOM chart every 200ms
+        
+        socket.on('depth_of_market', (domData) => {
+            const now = performance.now();
+            // Throttle updates to reduce browser load
+            if (now - lastDOMUpdate < DOM_THROTTLE_MS) {
+                return;
+            }
+            lastDOMUpdate = now;
+            
+            if (domData && domData.bids && domData.asks) {
+                // Sort bids in ascending order by price (X-axis)
+                const sortedBids = domData.bids.sort((a, b) => a[0] - b[0]);
+
+                // Sort asks in ascending order by price (X-axis)
+                const sortedAsks = domData.asks.sort((a, b) => a[0] - b[0]);
+
+                // Update bids and asks on the chart
+                domChart.series[0].setData(sortedBids, true); // Update bids
+                domChart.series[1].setData(sortedAsks, true); // Update asks
+
+                // Extract the actual price from domData
+                const actualPrice = domData.actualPrice || getMidPrice(sortedBids, sortedAsks);
+
+                // Update the actual price plot line dynamically
+                if (actualPrice !== undefined) {
+                    domChart.xAxis[0].update({
+                        plotLines: [{
+                            id: 'actualPriceLine', // Match the ID of the existing plot line
+                            color: 'white',
+                            value: actualPrice, // Set the new price dynamically
+                            width: 1,
+                            label: {
+                                text: `Actual price: ${actualPrice.toFixed(2)}`,
+                                rotation: 90,
+                                style: {
+                                    color: 'white'
+                                }
+                            }
+                        }]
+                    });
+                }
+            }
+        });
+
+        // Helper function to calculate the mid-price (if not provided in domData)
+        function getMidPrice(bids, asks) {
+            if (bids.length > 0 && asks.length > 0) {
+                const bestBid = bids[bids.length - 1][0]; // Last bid price
+                const bestAsk = asks[0][0]; // First ask price
+                return (bestBid + bestAsk) / 2; // Calculate the mid-price
+            }
+            return undefined;
+        }
+
+
+    
+// Replay controls
+const playBtn = document.getElementById('play-btn');
+const pauseBtn = document.getElementById('pause-btn');
+const stopBtn = document.getElementById('stop-btn');
+const speedSlider = document.getElementById('speed-slider');
+const speedValue = document.getElementById('speed-value');
+const positionSlider = document.getElementById('position-slider');
+const positionValue = document.getElementById('position-value');
+const filename = document.getElementById('filename');
+
+// Event listeners
+playBtn.addEventListener('click', () => {
+    socket.emit('replay_command', { action: 'play' });
+});
+
+pauseBtn.addEventListener('click', () => {
+    socket.emit('replay_command', { action: 'pause' });
+});
+
+stopBtn.addEventListener('click', () => {
+    socket.emit('replay_command', { action: 'stop' });
+});
+
+speedSlider.addEventListener('input', () => {
+    const speed = parseFloat(speedSlider.value);
+    speedValue.textContent = speed.toFixed(1) + 'x';
+    socket.emit('replay_command', { action: 'set_speed', speed: speed });
+});
+
+positionSlider.addEventListener('change', () => {
+    const position = parseInt(positionSlider.value);
+    socket.emit('replay_command', { action: 'seek', position: position });
+});
+
+// Handle replay status updates
+socket.on('replay_status', (status) => {
+    // Update UI
+    playBtn.disabled = status.running && !status.paused;
+    pauseBtn.disabled = !status.running || status.paused;
+    stopBtn.disabled = !status.running;
+    
+    // Update position slider
+    if (status.total > 0) {
+        positionSlider.max = status.total;
+        positionSlider.value = status.position;
+        positionValue.textContent = `${status.position}/${status.total}`;
+    }
+    
+    // Update speed
+    speedSlider.value = status.speed;
+    speedValue.textContent = status.speed.toFixed(1) + 'x';
+    
+    // Update filename
+    if (status.filename) {
+        filename.textContent = status.filename;
+    }
+});
+
+    </script>
+</body>
+</html>
