@@ -226,11 +226,35 @@
             height: 400,
             timeScale: {
                 timeVisible: true,
-                secondsVisible: true, // Show seconds if timestamps have small intervals
+                secondsVisible: true,
             },
-            layout: { textColor: 'white', background: { type: 'solid', color: 'black' } }
+            layout: { textColor: 'white', background: { type: 'solid', color: 'black' } },
+            grid: {
+                vertLines: { color: 'rgba(70, 70, 70, 0.5)' },
+                horzLines: { color: 'rgba(70, 70, 70, 0.5)' }
+            },
+            crosshair: {
+                mode: LightweightCharts.CrosshairMode.Normal,
+                vertLine: {
+                    width: 8,
+                    color: 'rgba(224, 227, 235, 0.1)',
+                    style: 0,
+                },
+                horzLine: {
+                    width: 8,
+                    color: 'rgba(224, 227, 235, 0.1)',
+                    style: 0,
+                },
+            },
         });
-        const bandsSeries = bandsChart.addLineSeries({ color: '#a81871', lineWidth: 2 });
+        
+        const bandsSeries = bandsChart.addLineSeries({ 
+            color: '#a81871', 
+            lineWidth: 2,
+            title: 'SMA',
+            priceLineVisible: false,
+            lastValueVisible: true,
+        });
 
         // Legend for bands chart
         const bandTime = document.getElementById('band-time');
@@ -252,6 +276,18 @@
             // Reset legend when there's no valid data
             bandTime.textContent = '-';
             smaValue.textContent = '-';
+        });
+
+        // Listen for band (SMA) updates
+        socket.on('band', (data) => {
+            // console.log('Band data received:', data); // Debug log
+            if (data && data.length > 0) {
+                const formattedData = data.map(item => ({
+                    time: item.time,
+                    value: parseFloat(item.value)
+                }));
+                bandsSeries.setData(formattedData);
+            }
         });
 
         function convertUnixToDate(unixTime) {
@@ -290,12 +326,6 @@
             candlestickSeries.setData(data);
             securityId.textContent = data[0].security_id;
 
-        });
-
-        // Listen for band (SMA) updates
-        socket.on('band', (data) => {
-            //console.log('Band data received:', data); // Debug log
-            bandsSeries.setData(data);
         });
 
         // Order book
