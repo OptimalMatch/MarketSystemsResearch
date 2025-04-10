@@ -440,7 +440,7 @@ def run_simulation(enable_market_maker: bool = True):
             print(f"Position: {mm_stats['position']}")
             print(f"Market Condition: {mm_stats['condition']}")
 
-            time.sleep(5)
+            time.sleep(10)
 
     except KeyboardInterrupt:
         print("\nStopping simulation...")

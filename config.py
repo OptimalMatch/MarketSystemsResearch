@@ -25,7 +25,7 @@ class Config:
     SMA_PERIOD = 5
     
     # Performance settings
-    STATS_UPDATE_INTERVAL = 1  # seconds
+    STATS_UPDATE_INTERVAL = 5  # seconds
     
     # Logging settings
     LOG_LEVEL = 'INFO'

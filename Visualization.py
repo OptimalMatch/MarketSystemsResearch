@@ -31,8 +31,8 @@ class Visualization:
             self.app,
             cors_allowed_origins="*",
             async_mode='eventlet',
-            ping_timeout=5,
-            ping_interval=1,
+            ping_timeout=30,  # Increased from 5 to 30 seconds
+            ping_interval=5,  # Increased from 1 to 5 seconds
             max_http_buffer_size=1e8,
             logger=False,
             engineio_logger=False
@@ -73,7 +73,9 @@ class Visualization:
                 # Send stored markers to the client
                 for marker in self.markers:
                     emit("market_maker_marker", marker)
-                logger.info("Client connected and initialized with data")
+                # Log connection only in debug mode to reduce log noise
+                if Config.DEBUG:
+                    logger.info("Client connected and initialized with data")
             except Exception as e:
                 logger.error(f"Error during client connection: {str(e)}")
 
