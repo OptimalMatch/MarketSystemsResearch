@@ -54,7 +54,7 @@
     <!-- Loading progress bar (hidden by default) -->
     <div id="loading-container" class="loading-container">
         <div class="loading-content">
-            <h3>Loading Trade Data</h3>
+            <h3>Loading Trade Data Into Server Memory</h3>
             <div class="loading-status-container">
                 <div class="loading-progress-container">
                     <div id="loading-progress-bar" class="loading-progress-bar"></div>
@@ -295,6 +295,18 @@
 
         // Listen for aggregated trades and update the chart
         const aggregatedTradeData = [];
+        let volumeChartUpdatePending = false;
+        let lastVolumeUpdateTime = 0;
+
+        // Function to update the volume chart - ALWAYS update immediately
+        function updateVolumeChart() {
+            // Sort the data by time to ensure chart updates correctly
+            aggregatedTradeData.sort((a, b) => a.time - b.time);
+            
+            // Always update the chart immediately
+            tradeSeries.setData(aggregatedTradeData);
+            volumeChartUpdatePending = false;
+        }
 
         socket.on('aggregated_trade', (aggregatedTrade) => {
             //console.log('Received aggregated trade:', aggregatedTrade);
@@ -319,11 +331,8 @@
                 });
             }
 
-            // Sort the data by time to ensure chart updates correctly
-            aggregatedTradeData.sort((a, b) => a.time - b.time);
-
-            // Update the chart
-            tradeSeries.setData(aggregatedTradeData);
+            // Update the chart with throttling
+            updateVolumeChart();
         });
 
         // Candlestick chart

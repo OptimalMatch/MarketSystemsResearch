@@ -611,22 +611,26 @@ class TradeLogReplayer:
     def emit_trade(self, trade, force_emit=False):
         """Emit a trade to the frontend with speed-based throttling"""
         try:
-            # Skip excessive emissions at high speeds unless forced
-            # Use less aggressive throttling to ensure higher speeds are actually faster
-            if not force_emit and self.speed_factor > 10000:
-                # At extreme speeds, emit trades more frequently than before
-                if self.current_position % 100 != 0:
-                    return
-            elif not force_emit and self.speed_factor > 5000:
-                # At very high speeds, emit more frequently than before
-                if self.current_position % 50 != 0:
-                    return
-            elif not force_emit and self.speed_factor > 1000:
-                # At high speeds, emit more frequently than before
-                if self.current_position % 20 != 0:
-                    return
+            # Always emit trades for the chart, but throttle other heavy operations
+            # We'll use a separate flag to track if we should emit full trade details
+            emit_full_details = force_emit
+            
+            # Determine if we should emit full details based on speed and position
+            if not force_emit:
+                if self.speed_factor > 10000:
+                    # At extreme speeds, emit full details occasionally
+                    emit_full_details = (self.current_position % 100 == 0)
+                elif self.speed_factor > 5000:
+                    # At very high speeds, emit full details more frequently
+                    emit_full_details = (self.current_position % 50 == 0)
+                elif self.speed_factor > 1000:
+                    # At high speeds, emit full details regularly
+                    emit_full_details = (self.current_position % 20 == 0)
+                else:
+                    # At normal speeds, always emit full details
+                    emit_full_details = True
                     
-            # Convert trade to the format expected by the frontend
+            # Always prepare basic trade data for the chart
             trade_data = {
                 "id": trade["id"],
                 "time": int(time.time()),
@@ -635,8 +639,8 @@ class TradeLogReplayer:
                 "size": float(trade["size"])
             }
             
-            # Only include buyer/seller IDs at lower speeds to reduce data size
-            if self.speed_factor < 1000:
+            # Only include buyer/seller IDs when emitting full details to reduce data size
+            if emit_full_details:
                 trade_data["buyer_id"] = trade["buyer_id"]
                 trade_data["seller_id"] = trade["seller_id"]
             
@@ -650,16 +654,14 @@ class TradeLogReplayer:
                     logger.debug(f"Could not parse trade time: {str(e)}, using system time")
                 pass
             
-            # Emit trade to frontend
+            # Always emit trade to frontend for the chart
             if self.speed_factor < 1000:
                 logger.debug(f"Emitting trade: {trade_data}")
             self.socketio.emit("trade", trade_data)
             
-            # Also emit as aggregated trade for volume chart
-            # At high speeds, only emit aggregated trades occasionally but not too aggressively
-            if self.speed_factor > 5000:
-                if self.current_position % 50 != 0:
-                    return
+            # ALWAYS emit volume data regardless of speed
+            # This ensures the volume chart continues to update even at very high speeds
+            # No throttling at all - always send the data
                     
             aggregated_trade = {
                 "time": trade_data["time"],
