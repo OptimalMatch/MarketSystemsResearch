@@ -9,4 +9,4 @@ flask-socketio
 flask-cors
 gevent
 eventlet
-pandas==2.0.0
+pandas

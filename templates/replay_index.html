@@ -63,7 +63,7 @@
             </div>
             <div id="loading-message" class="loading-message">Preparing to load...</div>
             <div id="loading-details" class="loading-details">
-                <div id="loading-chunk-info">Chunks: 0/0</div>
+                <div id="loading-mb-info">Data loaded: 0 MB</div>
                 <div id="loading-row-info">Rows: 0</div>
             </div>
         </div>
@@ -77,7 +77,7 @@
         <button id="stop-btn" class="control-btn">Stop</button>
         <div style="margin-left: 20px;">
             <label for="speed-slider">Speed: <span id="speed-value">1x</span></label>
-            <input type="range" id="speed-slider" min="1" max="100" step="1" value="1">
+            <input type="range" id="speed-slider" min="1" max="1000" step="1" value="1">
         </div>
         <div style="margin-left: 20px; flex-grow: 1;">
             <label for="position-slider">Position: <span id="position-value">0/0</span></label>
@@ -151,7 +151,7 @@
     .loading-details {
         margin-top: 20px;
     }
-    #loading-chunk-info, #loading-row-info {
+    #loading-mb-info, #loading-row-info {
         display: none;
     }
 </style>
@@ -849,7 +849,7 @@
             const loadingProgressBar = document.getElementById('loading-progress-bar');
             const loadingMessage = document.getElementById('loading-message');
             const loadingPercentage = document.getElementById('loading-percentage');
-            const loadingChunkInfo = document.getElementById('loading-chunk-info');
+            const loadingMBInfo = document.getElementById('loading-mb-info');
             const loadingRowInfo = document.getElementById('loading-row-info');
             
             // Show loading container
@@ -865,11 +865,16 @@
             if (data.message) {
                 loadingMessage.textContent = data.message;
                 
-                // Extract and display chunk information if available
-                const chunkMatch = data.message.match(/chunk (\d+)\/(\d+)/i);
-                if (chunkMatch && chunkMatch.length >= 3) {
-                    loadingChunkInfo.textContent = `Chunks: ${chunkMatch[1]}/${chunkMatch[2]}`;
-                    loadingChunkInfo.style.display = 'block';
+                // Extract and display megabytes loaded if available
+                const mbMatch = data.message.match(/(\d+(?:\.\d+)?) MB/i);
+                if (mbMatch && mbMatch.length >= 2) {
+                    loadingMBInfo.textContent = `Data loaded: ${mbMatch[1]} MB`;
+                    loadingMBInfo.style.display = 'block';
+                } else if (data.bytes_loaded) {
+                    // If server provides bytes directly
+                    const mbLoaded = (data.bytes_loaded / (1024 * 1024)).toFixed(2);
+                    loadingMBInfo.textContent = `Data loaded: ${mbLoaded} MB`;
+                    loadingMBInfo.style.display = 'block';
                 }
                 
                 // Extract and display row counts if available

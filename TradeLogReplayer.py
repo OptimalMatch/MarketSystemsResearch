@@ -576,7 +576,9 @@ class TradeLogReplayer:
             self.socketio.emit("loading_status", {
                 "status": "loading",
                 "message": f"File size: {file_size/1024/1024:.2f} MB",
-                "progress": 10
+                "progress": 10,
+                "bytes_loaded": 0,
+                "bytes_total": file_size
             })
             
             # Determine if this is a large file
@@ -586,7 +588,9 @@ class TradeLogReplayer:
             self.socketio.emit("loading_status", {
                 "status": "loading",
                 "message": "Counting rows for progress tracking...",
-                "progress": 15
+                "progress": 15,
+                "bytes_loaded": 0,
+                "bytes_total": file_size
             })
             
             total_rows = 0
@@ -627,7 +631,9 @@ class TradeLogReplayer:
             self.socketio.emit("loading_status", {
                 "status": "loading",
                 "message": f"Starting to load {total_rows:,} rows in {total_chunks} chunks",
-                "progress": 20
+                "progress": 20,
+                "bytes_loaded": 0,
+                "bytes_total": file_size
             })
             
             # Initialize empty list for trades
@@ -659,7 +665,9 @@ class TradeLogReplayer:
                 self.socketio.emit("loading_status", {
                     "status": "loading",
                     "message": f"Loading large file in chunks ({chunk_size:,} rows per chunk)",
-                    "progress": progress_start
+                    "progress": progress_start,
+                    "bytes_loaded": 0,
+                    "bytes_total": file_size
                 })
                 
                 try:
@@ -715,15 +723,20 @@ class TradeLogReplayer:
                         chunk_progress = current_chunk / total_chunks
                         progress = progress_start + (progress_chunk_range * chunk_progress)
                         
+                        # Calculate approximate bytes loaded based on chunk progress
+                        bytes_loaded = int(file_size * (current_chunk / total_chunks))
+                        
                         # Log progress every few chunks
                         if current_chunk % 5 == 0 or current_chunk == total_chunks:
-                            logger.info(f"Loaded chunk {current_chunk}/{total_chunks} ({len(self.trades):,} trades so far)")
+                            logger.info(f"Loaded chunk {current_chunk}/{total_chunks} ({len(self.trades):,} trades so far, {bytes_loaded/1024/1024:.2f} MB)")
                         
                         # Send progress update to client
                         self.socketio.emit("loading_status", {
                             "status": "loading",
-                            "message": f"Loading chunk {current_chunk}/{total_chunks} ({int(chunk_progress*100)}% complete)",
-                            "progress": int(progress)
+                            "message": f"Loading chunk {current_chunk}/{total_chunks} ({int(chunk_progress*100)}% complete, {bytes_loaded/1024/1024:.2f} MB)",
+                            "progress": int(progress),
+                            "bytes_loaded": bytes_loaded,
+                            "bytes_total": file_size
                         })
                         
                 except Exception as e:
@@ -787,8 +800,10 @@ class TradeLogReplayer:
                     # Update progress
                     self.socketio.emit("loading_status", {
                         "status": "loading",
-                        "message": f"Loaded {len(self.trades):,} trades all at once",
-                        "progress": progress_start + progress_chunk_range
+                        "message": f"Loaded {len(self.trades):,} trades all at once ({file_size/1024/1024:.2f} MB)",
+                        "progress": progress_start + progress_chunk_range,
+                        "bytes_loaded": file_size,
+                        "bytes_total": file_size
                     })
                     
                 except Exception as e:
@@ -806,7 +821,9 @@ class TradeLogReplayer:
             self.socketio.emit("loading_status", {
                 "status": "loading",
                 "message": f"Sorting {len(self.trades):,} trades by time...",
-                "progress": 85
+                "progress": 85,
+                "bytes_loaded": file_size,
+                "bytes_total": file_size
             })
             
             # Sort trades by time
@@ -816,8 +833,10 @@ class TradeLogReplayer:
             logger.info(f"Successfully loaded {len(self.trades):,} trades")
             self.socketio.emit("loading_status", {
                 "status": "loading",
-                "message": f"Successfully loaded {len(self.trades):,} trades",
-                "progress": 95
+                "message": f"Successfully loaded {len(self.trades):,} trades ({file_size/1024/1024:.2f} MB)",
+                "progress": 95,
+                "bytes_loaded": file_size,
+                "bytes_total": file_size
             })
             
             # Initialize trading data with first trade
@@ -1021,15 +1040,41 @@ class TradeLogReplayer:
                 trades_processed += 1
                 
                 # Calculate sleep time based on speed
-                if self.speed_factor < 100:
-                    # For slower speeds, sleep between trades
-                    # For speed_factor = 1, sleep for 100ms between trades for smooth playback
-                    # For higher speeds, reduce sleep time accordingly
-                    sleep_time = 0.1 / self.speed_factor
-                    time.sleep(min(0.1, sleep_time))  # Cap at 100ms to prevent too long delays
-                elif self.current_position % 1000 == 0:
-                    # For very high speeds, just yield CPU occasionally
-                    time.sleep(0.001)
+                # Use a more gradual scaling of sleep time across all speed ranges
+                # Base delay is 100ms at 1x speed
+                base_delay = 0.1
+                
+                if self.speed_factor <= 1:
+                    # For normal or slow speeds, use the full base delay
+                    sleep_time = base_delay
+                elif self.speed_factor <= 100:
+                    # For speeds 1x to 100x, gradually reduce sleep time
+                    # This creates a smooth transition from 100ms at 1x to 1ms at 100x
+                    sleep_time = base_delay / self.speed_factor
+                elif self.speed_factor <= 500:
+                    # For speeds 100x to 500x, use quadratic scaling
+                    # This creates an exponential decrease in sleep time as speed increases
+                    # At 100x: ~1ms, at 200x: ~0.25ms, at 300x: ~0.11ms
+                    scale_factor = (self.speed_factor / 100) ** 2
+                    sleep_time = max(0.00005, base_delay / (100 * scale_factor))
+                else:
+                    # For extreme speeds (500x-1000x), use cubic scaling for even faster playback
+                    # This creates a very steep decrease in sleep time
+                    # At 500x: ~0.04ms, at 750x: ~0.012ms, at 1000x: ~0.005ms
+                    scale_factor = (self.speed_factor / 100) ** 3
+                    sleep_time = max(0.000025, base_delay / (100 * scale_factor))
+                
+                # Apply the calculated sleep time
+                time.sleep(sleep_time)
+                
+                # For very high speeds, check pause state more frequently
+                # This makes the pause button more responsive
+                # Scale the check frequency based on speed - higher speeds check more often
+                check_interval = max(10, int(1000 / self.speed_factor))
+                if self.speed_factor > 100 and self.current_position % check_interval == 0:
+                    # Check if we've been paused
+                    if self.is_paused:
+                        continue
                 
                 # Emit status updates periodically
                 if time.time() - last_status_emit > status_interval:
@@ -1078,13 +1123,17 @@ class TradeLogReplayer:
     def set_speed(self, speed_factor):
         """Set the replay speed factor"""
         try:
-            # Clamp speed to reasonable values
-            speed_factor = max(0.1, min(100000, float(speed_factor)))
+            # Clamp speed to reasonable values but allow much higher speeds
+            # Increased from 100000 to 1000000 to support extreme speeds
+            speed_factor = max(0.1, min(1000000, float(speed_factor)))
             self.speed_factor = speed_factor
             logger.info(f"Set replay speed to {speed_factor}x")
             
             # Notify clients
             self.socketio.emit("speed_update", {"speed": speed_factor})
+            
+            # For extremely high speeds (>10000x), consider using the fast-forward method
+            # This is handled separately in the replay command handler
             
             return True
         except Exception as e:
