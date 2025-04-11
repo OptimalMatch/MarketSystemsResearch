@@ -82,6 +82,7 @@
         <div style="margin-left: 20px; flex-grow: 1;">
             <label for="position-slider">Position: <span id="position-value">0/0</span></label>
             <input type="range" id="position-slider" min="0" max="100" value="0" style="width: 100%;">
+            <div id="position-status" style="color: #ffcc00; font-weight: bold; display: none; background-color: rgba(0, 0, 0, 0.7); padding: 5px; border-radius: 4px; margin-top: 5px; text-align: center;">Playing to position...</div>
         </div>
         <div style="margin-left: 20px;">
             <span id="filename">No file loaded</span>
@@ -233,6 +234,12 @@
         // Global tracking variables
         let currentPosition = 0;
         let previousSpeed = 1.0; // Store the previous speed before setting to 2000x
+        let playingToPosition = false; // Flag to track when we're playing to a position
+        let targetPosition = 0; // Store the target position
+        
+        // Initialize cooldown tracking variables
+        window.targetReachedCooldown = false;
+        window.reachedTargetTime = 0;
         
         const socket = io(socketOptions);
         
@@ -1117,11 +1124,23 @@ positionSlider.addEventListener('change', () => {
     const position = parseInt(positionSlider.value);
     console.log(`Position slider changed to ${position}`);
     
+    // Set the global flags
+    playingToPosition = true;
+    targetPosition = position;
+    
     // Store the current speed before changing it
     socket.emit('replay_command', { action: 'get_speed' });
     
     // First, stop the current replay
     socket.emit('replay_command', { action: 'stop' });
+    
+    // Disable the slider while playing to position
+    positionSlider.disabled = true;
+    
+    // Show the status message
+    const positionStatus = document.getElementById('position-status');
+    positionStatus.textContent = `Playing to position ${position}/${positionSlider.max}`;
+    positionStatus.style.display = 'block';
     
     // Use a longer delay to ensure stop completes
     setTimeout(() => {
@@ -1143,6 +1162,9 @@ positionSlider.addEventListener('change', () => {
                 
                 // Start a client-side monitoring interval to check position
                 const checkInterval = setInterval(() => {
+                    // Update the status message while playing
+                    positionStatus.textContent = `Playing to position ${position}/${positionSlider.max} (at ${currentPosition})`;
+                    
                     if (currentPosition >= position) {
                         console.log(`Reached target position ${position}, stopping`);
                         socket.emit('replay_command', { action: 'pause' });
@@ -1150,6 +1172,13 @@ positionSlider.addEventListener('change', () => {
                         // Restore the previous speed
                         console.log(`Restoring previous speed: ${previousSpeed}x`);
                         socket.emit('replay_command', { action: 'set_speed', speed: previousSpeed });
+                        
+                        // Re-enable the slider and reset flags
+                        positionSlider.disabled = false;
+                        playingToPosition = false;
+                        
+                        // Hide the status message
+                        positionStatus.style.display = 'none';
                         
                         clearInterval(checkInterval);
                     }
@@ -1166,6 +1195,30 @@ socket.on('replay_status', (status) => {
     playBtn.disabled = status.running && !status.paused;
     pauseBtn.disabled = !status.running || status.paused;
     stopBtn.disabled = !status.running;
+    
+    // If replay is stopped or paused, ensure position slider is enabled
+    if (status.status === "stopped" || status.status === "paused") {
+        // Re-enable the position slider if it was disabled
+        positionSlider.disabled = false;
+        
+        // If we were playing to a position and got stopped/paused, reset the flag
+        if (playingToPosition && !window.targetReachedCooldown) {
+            console.log("Replay stopped or paused while playing to position, resetting flags");
+            playingToPosition = false;
+            
+            // Update the status message to show it was interrupted
+            const positionStatus = document.getElementById('position-status');
+            positionStatus.textContent = `Play to position ${targetPosition} was interrupted`;
+            
+            // Hide the status message after a delay
+            setTimeout(() => {
+                // Only hide if we're not in a cooldown period
+                if (!window.targetReachedCooldown) {
+                    positionStatus.style.display = 'none';
+                }
+            }, 2000); // Keep visible for 2 seconds
+        }
+    }
     
     // If replay is stopped, ensure charts are cleared
     if (status.status === "stopped") {
@@ -1195,10 +1248,56 @@ socket.on('position_update', (data) => {
     console.log('Position update:', data);
     positionSlider.max = data.total;
     positionSlider.value = data.position;
-    positionValue.textContent = `${data.position}/${data.total}`;
     
     // Update the global currentPosition variable
     currentPosition = data.position;
+    
+    // Always update the position text with the current position
+    positionValue.textContent = `${data.position}/${data.total}`;
+    
+    // If we're playing to a position, update the status message
+    if (playingToPosition) {
+        const positionStatus = document.getElementById('position-status');
+        // Make sure the status message is visible
+        positionStatus.style.display = 'block';
+        positionStatus.textContent = `Playing to position ${targetPosition}/${data.total} (at ${data.position})`;
+        
+        // Check if we've reached the target position
+        if (data.position >= targetPosition) {
+            console.log(`Reached target position ${targetPosition} via position_update, stopping`);
+            socket.emit('replay_command', { action: 'pause' });
+            
+            // Restore the previous speed
+            console.log(`Restoring previous speed: ${previousSpeed}x`);
+            socket.emit('replay_command', { action: 'set_speed', speed: previousSpeed });
+            
+            // Update the status message to show we've reached the target
+            positionStatus.textContent = `Reached target position ${targetPosition}/${data.total}`;
+            
+            // Create a timestamp to track when we reached the target
+            const reachedTargetTime = Date.now();
+            
+            // Store this timestamp in a global variable so other handlers can check it
+            window.reachedTargetTime = reachedTargetTime;
+            
+            // Re-enable the slider
+            positionSlider.disabled = false;
+            
+            // Set a flag to indicate we've reached the target but are still in the cooldown period
+            window.targetReachedCooldown = true;
+            
+            // Only reset the playingToPosition flag after the cooldown
+            setTimeout(() => {
+                // Only hide if this is still the most recent target reached event
+                if (window.reachedTargetTime === reachedTargetTime) {
+                    console.log('Hiding position status after cooldown');
+                    positionStatus.style.display = 'none';
+                    playingToPosition = false;
+                    window.targetReachedCooldown = false;
+                }
+            }, 8000); // Keep visible for 8 seconds after reaching target
+        }
+    }
     
     // If position is 0, clear all charts
     if (data.position === 0) {
