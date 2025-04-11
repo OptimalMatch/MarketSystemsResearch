@@ -308,9 +308,22 @@
             volumeChartUpdatePending = false;
         }
 
+        // Add debugging to track aggregated trade updates
+        let lastTradeTime = 0;
+        let tradeCounter = 0;
+        let highSpeedMode = false;
+        
         socket.on('aggregated_trade', (aggregatedTrade) => {
-            //console.log('Received aggregated trade:', aggregatedTrade);
-
+            // Count trades for debugging
+            tradeCounter++;
+            const now = Date.now();
+            
+            // Log every 100th trade in high speed mode
+            if (tradeCounter % 100 === 0) {
+                console.log(`Received ${tradeCounter} trades, last update: ${now - lastTradeTime}ms ago`);
+                lastTradeTime = now;
+            }
+            
             // Validate data
             if (!aggregatedTrade.time || !aggregatedTrade.total_volume) {
                 console.warn('Invalid trade data:', aggregatedTrade);
@@ -330,8 +343,9 @@
                     value: aggregatedTrade.total_volume,
                 });
             }
-
-            // Update the chart with throttling
+            
+            // Always update the chart immediately - no throttling
+            // This ensures the volume chart continues to update at all speeds
             updateVolumeChart();
         });
 

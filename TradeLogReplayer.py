@@ -1122,13 +1122,28 @@ class TradeLogReplayer:
                     batch_size = int(self.speed_factor / 10)  # 10x larger batches
                     end_position = min(self.current_position + batch_size, len(self.trades))
                     
+                    # Collect trades for aggregated volume updates
+                    batch_trades = []
+                    sample_interval = max(1, batch_size // 20)  # Take about 20 samples from the batch
+                    
                     # Process the batch of trades
                     for i in range(self.current_position, end_position):
                         self.current_position = i
                         trade = self.trades[i]
-                        # Only process every Nth trade for efficiency
+                        
+                        # Collect key trades for batch processing
+                        if i % sample_interval == 0:
+                            batch_trades.append(trade)
+                        
+                        # Only process every Nth trade for candlestick efficiency
                         if i % 10 == 0:
                             self.update_candlestick(trade, emit=False)  # Update without emitting
+                    
+                    # Emit only one aggregated trade update for the entire batch
+                    # This significantly reduces the number of socket.io messages
+                    if batch_trades:
+                        # Use the last trade for the update
+                        self.emit_trade(batch_trades[-1], force_emit=True)
                     
                     # Emit only the final state after batch processing
                     if len(self.candlestick_data) > 0:
@@ -1149,13 +1164,26 @@ class TradeLogReplayer:
                     batch_size = int(self.speed_factor / 20)  # Scale batch size with speed
                     end_position = min(self.current_position + batch_size, len(self.trades))
                     
+                    # Collect trades for aggregated volume updates
+                    batch_trades = []
+                    
                     # Process the batch of trades
                     for i in range(self.current_position, end_position):
                         self.current_position = i
                         trade = self.trades[i]
-                        # Only process every 5th trade for efficiency
+                        
+                        # Collect trades for batch processing
+                        batch_trades.append(trade)
+                        
+                        # Only process every 5th trade for candlestick efficiency
                         if i % 5 == 0:
                             self.update_candlestick(trade, emit=False)  # Update without emitting
+                    
+                    # Emit only one aggregated trade update for the entire batch
+                    # This significantly reduces the number of socket.io messages
+                    if batch_trades:
+                        # Use the last trade for the update
+                        self.emit_trade(batch_trades[-1], force_emit=True)
                     
                     # Emit only the final state after batch processing
                     if len(self.candlestick_data) > 0:
@@ -1494,6 +1522,9 @@ class TradeLogReplayer:
         
         # Process key trades along the way to maintain data integrity
         # For extremely high speeds, we'll sample trades at regular intervals but more sparsely
+        # Collect sample trades for aggregated volume updates
+        sample_trades = []
+        
         if jump_size > 100000:
             # For very large jumps, take only 5 samples to minimize processing
             sample_interval = max(1, (target_position - self.current_position) // 5)
@@ -1504,6 +1535,8 @@ class TradeLogReplayer:
                     sample_trade = self.trades[sample_pos]
                     # Update candlestick without emitting to client
                     self.update_candlestick(sample_trade, emit=False)
+                    # Collect for aggregated volume update
+                    sample_trades.append(sample_trade)
         elif jump_size > 10000:
             # For large jumps, take 8 samples
             sample_interval = max(1, (target_position - self.current_position) // 8)
@@ -1514,6 +1547,14 @@ class TradeLogReplayer:
                     sample_trade = self.trades[sample_pos]
                     # Update candlestick without emitting to client
                     self.update_candlestick(sample_trade, emit=False)
+                    # Collect for aggregated volume update
+                    sample_trades.append(sample_trade)
+        
+        # Emit only one aggregated trade update for all samples
+        # This significantly reduces the number of socket.io messages
+        if sample_trades:
+            # Use the last trade for the update
+            self.emit_trade(sample_trades[-1], force_emit=True)
         
         # Get the trade at the target position for updating the UI
         if target_position < len(self.trades):
