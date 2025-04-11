@@ -171,7 +171,7 @@
             <div id="candlestick-chart"></div>
             <div id="candlestick-legend" style="
                 position: absolute;
-                top: 660px;
+                top: 860px;
                 left: 10px;
                 z-index: 1;
                 font-size: 24px;
@@ -201,7 +201,7 @@
     <div id="bands-chart"></div>
     <div id="bands-legend" style="
         position: absolute;
-        top: 1120px;
+        top: 1320px;
         left: 10px;
         z-index: 1;
         font-size: 24px;
@@ -354,16 +354,88 @@
             closeValue.textContent = '-';
         });
 
+        // Function to clear all charts
+        function clearAllCharts() {
+            console.log("Clearing all charts");
+            // Clear candlestick chart
+            if (typeof candlestickSeries !== 'undefined') {
+                candlestickSeries.setData([]);
+                // Clear markers
+                candlestickSeries.setMarkers([]);
+            }
+            
+            // Clear price series
+            if (typeof priceSeries !== 'undefined') {
+                priceSeries.setData([]);
+            }
+            
+            // Clear SMA series
+            if (typeof smaSeries !== 'undefined' && Array.isArray(smaSeries)) {
+                smaSeries.forEach(series => {
+                    if (series && typeof series.setData === 'function') {
+                        series.setData([]);
+                    }
+                });
+            }
+            
+            // Clear volume chart
+            if (typeof volumeSeries !== 'undefined') {
+                volumeSeries.setData([]);
+            }
+            
+            // Clear trade volume chart (histogram)
+            if (typeof tradeSeries !== 'undefined') {
+                tradeSeries.setData([]);
+                // Also clear the data array
+                if (typeof aggregatedTradeData !== 'undefined' && Array.isArray(aggregatedTradeData)) {
+                    aggregatedTradeData.length = 0; // Clear the array
+                }
+            }
+            
+            // Clear DOM chart (Depth of Market)
+            if (typeof domChart !== 'undefined') {
+                // Clear both bid and ask series
+                if (domChart.series && domChart.series.length >= 2) {
+                    domChart.series[0].setData([], true); // Clear bids
+                    domChart.series[1].setData([], true); // Clear asks
+                }
+            }
+            
+            // Clear orderbook display
+            const orderbookBids = document.getElementById('orderbookbids');
+            const orderbookAsks = document.getElementById('orderbookasks');
+            if (orderbookBids) orderbookBids.innerHTML = '';
+            if (orderbookAsks) orderbookAsks.innerHTML = '';
+            
+            // Also clear the HTML orderbook if it exists
+            const orderbookDiv = document.getElementById('orderbook');
+            if (orderbookDiv) {
+                orderbookDiv.innerHTML = `
+                    <h3>Bids</h3>
+                    <ul id="orderbookbids"></ul>
+                    <h3>Asks</h3>
+                    <ul id="orderbookasks"></ul>
+                `;
+            }
+        }
+        
         // Initial candlestick data load and chart setup
         socket.on('candlestick', function(data) {
+            console.log("Received initial candlestick data, length:", data ? data.length : 0);
             if (!data || !Array.isArray(data) || data.length === 0) {
-                console.log("Empty or invalid candlestick data received");
+                console.log("Empty candlestick data received - clearing chart");
+                // Clear all charts when receiving empty data
+                clearAllCharts();
                 return;
             }
             
             try {
                 // Format the data correctly for the chart
-                const formattedData = data.map(candle => {
+                const formattedData = [];
+                
+                for (let i = 0; i < data.length; i++) {
+                    const candle = data[i];
+                    
                     // Ensure all required fields have valid numeric values
                     const time = typeof candle.time === 'number' ? candle.time : parseInt(candle.time || 0);
                     const open = parseFloat(candle.open || 0);
@@ -371,28 +443,51 @@
                     const low = parseFloat(candle.low || 0);
                     const close = parseFloat(candle.close || 0);
                     
-                    // Skip invalid candles (e.g., with time=0)
-                    if (time <= 0 || isNaN(time)) {
-                        return null;
+                    // Skip invalid candles (e.g., with time=0 or NaN values)
+                    if (time <= 0 || isNaN(time) || isNaN(open) || isNaN(high) || isNaN(low) || isNaN(close)) {
+                        console.warn('Skipping invalid candle at index', i, ':', candle);
+                        continue;
                     }
                     
-                    return {
-                        time,
-                        open,
-                        high,
-                        low,
-                        close
-                    };
-                }).filter(candle => candle !== null); // Filter out null entries
+                    // Ensure high is never less than low (which can cause chart errors)
+                    const validHigh = Math.max(high, low, open, close);
+                    const validLow = Math.min(low, high, open, close);
+                    
+                    formattedData.push({
+                        time: time,
+                        open: open,
+                        high: validHigh,
+                        low: validLow,
+                        close: close
+                    });
+                }
                 
-                // Skip if we don't have valid data after filtering
+                // Skip if we don't have valid data after formatting
                 if (formattedData.length === 0) {
                     console.warn("No valid candlestick data after formatting");
+                    // Initialize with empty data to avoid errors
+                    candlestickSeries.setData([]);
                     return;
                 }
                 
-                //console.log("Setting candlestick data:", formattedData);
-                candlestickSeries.setData(formattedData);
+                // Sort by time to ensure proper order
+                formattedData.sort((a, b) => a.time - b.time);
+                
+                console.log("Setting candlestick data, count:", formattedData.length);
+                console.log("First candle:", formattedData[0]);
+                console.log("Last candle:", formattedData[formattedData.length - 1]);
+                
+                try {
+                    candlestickSeries.setData(formattedData);
+                } catch (e) {
+                    console.error("Error setting candlestick data:", e);
+                    // Try with a simpler dataset as fallback
+                    const fallbackData = [
+                        { time: Math.floor(Date.now() / 1000), open: 10, high: 11, low: 9, close: 10.5 }
+                    ];
+                    console.log("Trying fallback data:", fallbackData);
+                    candlestickSeries.setData(fallbackData);
+                }
                 
                 // Also update the price line chart
                 const priceData = formattedData.map(candle => ({
@@ -415,10 +510,21 @@
         // Handle candlestick updates - optimized for performance
         socket.on('candlestick_update', function(data) {
             try {
-                //console.log("Received candlestick update:", data);
+                console.log("Received candlestick update, candles count:", data.candles ? data.candles.length : 0);
+                
+                // Check if we received empty data (chart clearing signal)
+                if (!data.candles || !Array.isArray(data.candles) || data.candles.length === 0) {
+                    console.log("Empty candlestick update received - clearing chart");
+                    clearAllCharts();
+                    return;
+                }
                 
                 // Format data properly regardless of update type
-                const formattedCandles = (data.candles || []).map(candle => {
+                const formattedCandles = [];
+                
+                for (let i = 0; i < (data.candles || []).length; i++) {
+                    const candle = data.candles[i];
+                    
                     // Ensure all required fields have valid numeric values
                     const time = typeof candle.time === 'number' ? candle.time : parseInt(candle.time || 0);
                     const open = parseFloat(candle.open || 0);
@@ -426,27 +532,56 @@
                     const low = parseFloat(candle.low || 0);
                     const close = parseFloat(candle.close || 0);
                     
-                    // Skip invalid candles
-                    if (time <= 0 || isNaN(time)) {
-                        return null;
+                    // Skip invalid candles with more comprehensive validation
+                    if (time <= 0 || isNaN(time) || isNaN(open) || isNaN(high) || isNaN(low) || isNaN(close)) {
+                        console.warn('Skipping invalid candle in update at index', i, ':', candle);
+                        continue;
                     }
                     
-                    return {
-                        time,
-                        open,
-                        high,
-                        low,
-                        close
-                    };
-                }).filter(candle => candle !== null); // Filter out null entries
+                    // Ensure high is never less than low (which can cause chart errors)
+                    const validHigh = Math.max(high, low, open, close);
+                    const validLow = Math.min(low, high, open, close);
+                    
+                    formattedCandles.push({
+                        time: time,
+                        open: open,
+                        high: validHigh,
+                        low: validLow,
+                        close: close
+                    });
+                }
                 
                 // Sort by time to ensure proper order
                 formattedCandles.sort((a, b) => a.time - b.time);
                 
                 // Always use setData to avoid timeline conflicts
                 if (formattedCandles.length > 0) {
-                    //console.log("Setting candlestick data:", formattedCandles);
-                    candlestickSeries.setData(formattedCandles);
+                    console.log("Setting candlestick data, count:", formattedCandles.length);
+                    console.log("First candle:", formattedCandles[0]);
+                    console.log("Last candle:", formattedCandles[formattedCandles.length - 1]);
+                    
+                    try {
+                        // Use update method for individual candles if possible
+                        if (formattedCandles.length === 1) {
+                            candlestickSeries.update(formattedCandles[0]);
+                        } else {
+                            candlestickSeries.setData(formattedCandles);
+                        }
+                    } catch (chartError) {
+                        console.error("Error setting candlestick data:", chartError);
+                        console.log("Problematic data:", JSON.stringify(formattedCandles));
+                        
+                        // Try with a simpler dataset as fallback
+                        try {
+                            const fallbackData = [
+                                { time: Math.floor(Date.now() / 1000), open: 10, high: 11, low: 9, close: 10.5 }
+                            ];
+                            console.log("Trying fallback data:", fallbackData);
+                            candlestickSeries.setData(fallbackData);
+                        } catch (fallbackError) {
+                            console.error("Even fallback data failed:", fallbackError);
+                        }
+                    }
                     
                     // Update security ID if available
                     if (data.candles[0] && data.candles[0].security_id) {
@@ -662,27 +797,39 @@
 
         // Listen for moving average updates
         socket.on('moving_averages', function(data) {
-            //console.log('Received moving averages:', data);
+            console.log('Received moving averages, length:', data ? data.length : 0);
             
-            if (data && data.length > 0) {
-                // Update each SMA series
-                data.forEach((sma, index) => {
-                    if (index < smaSeries.length && sma.values && Array.isArray(sma.values)) {
-                        try {
-                            // Format the data correctly with numeric timestamps
-                            const formattedValues = sma.values.map(point => ({
-                                time: typeof point.time === 'number' ? point.time : parseInt(point.time),
-                                value: parseFloat(point.value)
-                            }));
-                            
-                            //console.log(`Setting SMA ${index} data:`, formattedValues);
-                            smaSeries[index].setData(formattedValues);
-                        } catch (e) {
-                            console.error(`Error setting SMA ${index} data:`, e);
-                        }
+            // Check if we received empty data (chart clearing signal)
+            if (!data || !Array.isArray(data) || data.length === 0) {
+                console.log("Empty moving averages data received - clearing charts");
+                // Clear all SMA series
+                smaSeries.forEach((series, index) => {
+                    try {
+                        series.setData([]);
+                    } catch (e) {
+                        console.error(`Error clearing SMA ${index} data:`, e);
                     }
                 });
+                return;
             }
+            
+            // Update each SMA series with the new data
+            data.forEach((sma, index) => {
+                if (index < smaSeries.length && sma.values && Array.isArray(sma.values)) {
+                    try {
+                        // Format the data correctly with numeric timestamps
+                        const formattedValues = sma.values.map(point => ({
+                            time: typeof point.time === 'number' ? point.time : parseInt(point.time),
+                            value: parseFloat(point.value)
+                        }));
+                        
+                        console.log(`Setting SMA ${index} data, count:`, formattedValues.length);
+                        smaSeries[index].setData(formattedValues);
+                    } catch (e) {
+                        console.error(`Error setting SMA ${index} data:`, e);
+                    }
+                }
+            });
         });
         
         // DOM chart (using lightweight-charts instead of Highcharts for better performance)
@@ -986,6 +1133,12 @@ socket.on('replay_status', (status) => {
     pauseBtn.disabled = !status.running || status.paused;
     stopBtn.disabled = !status.running;
     
+    // If replay is stopped, ensure charts are cleared
+    if (status.status === "stopped") {
+        console.log("Replay stopped - clearing all charts");
+        clearAllCharts();
+    }
+    
     // Update position slider
     if (status.total > 0) {
         positionSlider.max = status.total;
@@ -1009,6 +1162,12 @@ socket.on('position_update', (data) => {
     positionSlider.max = data.total;
     positionSlider.value = data.position;
     positionValue.textContent = `${data.position}/${data.total}`;
+    
+    // If position is 0, clear all charts
+    if (data.position === 0) {
+        console.log("Position set to 0 - clearing all charts");
+        clearAllCharts();
+    }
 });
 
 // File info updates

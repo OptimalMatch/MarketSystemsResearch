@@ -11,6 +11,7 @@ import os
 import csv
 import time
 import argparse
+import math
 from datetime import datetime
 import pandas as pd
 from decimal import Decimal
@@ -324,29 +325,88 @@ class TradeLogReplayer:
         try:
             if not self.candlestick_data:
                 logger.warning("No candlestick data to emit")
+                # Send empty array to initialize chart properly
+                self.socketio.emit("candlestick", [])
                 return
                 
-            # Ensure timestamps are integers
+            # Ensure timestamps are integers and validate all numeric fields
             formatted_candles = []
+            current_time = int(time.time())
+            
             for candle in self.candlestick_data:
-                formatted_candle = candle.copy()
-                # Ensure time is an integer
-                if 'time' in formatted_candle and not isinstance(formatted_candle['time'], int):
-                    try:
-                        formatted_candle['time'] = int(formatted_candle['time'])
-                    except (ValueError, TypeError):
-                        # If conversion fails, use current timestamp
-                        formatted_candle['time'] = int(time.time())
-                formatted_candles.append(formatted_candle)
+                try:
+                    formatted_candle = candle.copy()
+                    
+                    # Ensure time is a valid integer timestamp
+                    if 'time' in formatted_candle:
+                        try:
+                            # Convert to integer if it's not already
+                            if not isinstance(formatted_candle['time'], int):
+                                formatted_candle['time'] = int(float(formatted_candle['time']))
+                            
+                            # Ensure time is positive and reasonable (not in the future)
+                            if formatted_candle['time'] <= 0 or formatted_candle['time'] > current_time + 86400:
+                                logger.warning(f"Invalid timestamp in candle: {formatted_candle['time']}")
+                                formatted_candle['time'] = current_time
+                        except (ValueError, TypeError):
+                            # If conversion fails, use current timestamp
+                            formatted_candle['time'] = current_time
+                    else:
+                        # If no time field, use current time
+                        formatted_candle['time'] = current_time
+                    
+                    # Validate numeric fields and ensure they are floats
+                    for field in ['open', 'high', 'low', 'close']:
+                        if field in formatted_candle:
+                            try:
+                                value = float(formatted_candle[field])
+                                if math.isnan(value) or math.isinf(value):
+                                    # Replace invalid values with a default
+                                    logger.warning(f"Invalid {field} value in candle: {formatted_candle}")
+                                    formatted_candle[field] = 1.0  # Use 1.0 as a safe default
+                                else:
+                                    formatted_candle[field] = value
+                            except (ValueError, TypeError):
+                                formatted_candle[field] = 1.0  # Use 1.0 as a safe default
+                        else:
+                            # If field is missing, use a default value
+                            formatted_candle[field] = 1.0
+                    
+                    # Ensure high is never less than low (which can cause chart errors)
+                    # Also ensure open and close are within high-low range
+                    high_value = max(formatted_candle['high'], formatted_candle['low'], 
+                                    formatted_candle['open'], formatted_candle['close'])
+                    low_value = min(formatted_candle['high'], formatted_candle['low'], 
+                                   formatted_candle['open'], formatted_candle['close'])
+                    
+                    formatted_candle['high'] = high_value
+                    formatted_candle['low'] = low_value
+                    
+                    # Add to formatted candles if it passes all validations
+                    formatted_candles.append(formatted_candle)
+                except Exception as e:
+                    logger.error(f"Error formatting candle: {str(e)}")
                 
             # Sort candles by time to ensure proper sequence
             formatted_candles.sort(key=lambda x: x['time'])
             
+            # Skip if we don't have valid data after filtering
+            if not formatted_candles:
+                logger.warning("No valid candlestick data after formatting")
+                # Send empty array to initialize chart properly
+                self.socketio.emit("candlestick_update", {"full_refresh": True, "candles": []})
+                return
+                
             # Create update data - always send full data to avoid timeline conflicts
             update_data = {
                 "full_refresh": True,
                 "candles": formatted_candles
             }
+            
+            # Log the first and last candle for debugging
+            if formatted_candles:
+                logger.debug(f"First candle: {formatted_candles[0]}")
+                logger.debug(f"Last candle: {formatted_candles[-1]}")
             
             # Emit update
             logger.debug(f"Emitting candlestick update: candles={len(update_data['candles'])}")
@@ -400,7 +460,16 @@ class TradeLogReplayer:
                 
             # Calculate the interval timestamp (e.g., for 1-second candles)
             interval_time = trade_time // self.candlestick_interval * self.candlestick_interval
-            trade_price = float(trade["price"])
+            
+            # Ensure we have a valid price
+            try:
+                trade_price = float(trade["price"])
+                if math.isnan(trade_price) or math.isinf(trade_price):
+                    logger.warning(f"Invalid trade price: {trade_price}")
+                    return False
+            except (ValueError, TypeError, KeyError) as e:
+                logger.warning(f"Could not parse trade price: {str(e)}")
+                return False
             
             # Debug log
             logger.debug(f"Updating candlestick for time {interval_time}, price {trade_price}")
@@ -411,7 +480,7 @@ class TradeLogReplayer:
                 # Create a new candle
                 new_candle = True
                 self.candlestick_data.append({
-                    'security_id': trade["security_id"],
+                    'security_id': trade.get("security_id", "Unknown"),
                     'time': interval_time,  # Already an integer timestamp
                     'open': trade_price,
                     'high': trade_price,
@@ -1210,6 +1279,17 @@ class TradeLogReplayer:
         self.current_position = 0
         logger.info("Replay stopped")
         
+        # Clear all chart data
+        self.candlestick_data = []
+        
+        # Send empty data to clear charts
+        logger.info("Clearing all charts on stop")
+        self.socketio.emit("candlestick", [])
+        self.socketio.emit("candlestick_update", {"full_refresh": True, "candles": []})
+        self.socketio.emit("moving_averages", [])
+        self.socketio.emit("orderbook", {"bids": [], "asks": []})
+        self.socketio.emit("trade_volume", [])
+        
         # Send full status update for UI consistency
         self.socketio.emit("replay_status", {
             "status": "stopped",
@@ -1229,8 +1309,22 @@ class TradeLogReplayer:
             self.current_position = position
             logger.info(f"Seek to position {position}/{len(self.trades)}")
             
-            # If available, get trade at position for UI update
-            if 0 <= position < len(self.trades):
+            # If position is 0, clear all charts to start fresh
+            if position == 0:
+                logger.info("Position set to 0, clearing all charts")
+                # Reset candlestick data
+                self.candlestick_data = []
+                # Send empty data to clear charts
+                self.socketio.emit("candlestick", [])
+                self.socketio.emit("candlestick_update", {"full_refresh": True, "candles": []})
+                # Clear moving averages
+                self.socketio.emit("moving_averages", [])
+                # Clear order book
+                self.socketio.emit("orderbook", {"bids": [], "asks": []})
+                # Clear trade chart
+                self.socketio.emit("trade_volume", [])
+            # Otherwise update with current trade data
+            elif 0 <= position < len(self.trades):
                 trade = self.trades[position]
                 # Update visualizations without sending trade event
                 self.update_orderbook(trade)
@@ -1296,6 +1390,19 @@ class TradeLogReplayer:
     def play(self):
         """Play/resume the replay"""
         logger.info("Play/resume replay")
+        
+        # If starting from position 0, ensure charts are cleared
+        if self.current_position == 0:
+            logger.info("Starting replay from beginning, clearing all charts")
+            # Reset candlestick data
+            self.candlestick_data = []
+            # Send empty data to clear charts
+            self.socketio.emit("candlestick", [])
+            self.socketio.emit("candlestick_update", {"full_refresh": True, "candles": []})
+            self.socketio.emit("moving_averages", [])
+            self.socketio.emit("orderbook", {"bids": [], "asks": []})
+            self.socketio.emit("trade_volume", [])
+        
         # Resume from paused state or run if not running
         if not self.is_running:
             self.run_replay_async()
@@ -1307,6 +1414,11 @@ class TradeLogReplayer:
         logger.info("Starting replay in background thread")
         self.is_running = True
         self.is_paused = False
+        
+        # If we're starting from the beginning, make sure charts are initialized
+        if self.current_position == 0:
+            # Reset chart data structures
+            self.candlestick_data = []
         
         # Create and start the replay thread
         if not hasattr(self, 'replay_thread') or not self.replay_thread.is_alive():
