@@ -363,6 +363,7 @@ flowchart TD
 ```
 
 ## 9. Trade Log Replayer
+[![Watch the replayer video](docs/images/screenshot_home.png)](https://youtu.be/c00UoqW__As?hd=1)
 
 The Trade Log Replayer is a tool for streaming historical trade logs to the visualization frontend. This allows you to analyze past trading sessions without having to re-run the simulation.
 
