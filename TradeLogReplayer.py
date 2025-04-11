@@ -45,6 +45,7 @@ class TradeLogReplayer:
         self.is_paused = False
         self.current_position = 0
         self.speed_factor = 1.0
+        self.target_stop_position = None  # Target position for auto-stop
         self.orderbook_data = {"bids": [], "asks": []}
         self.candlestick_data = []
         self.candlestick_interval = 1  # 1 second candles by default
@@ -162,10 +163,22 @@ class TradeLogReplayer:
                 elif command.get("action") == "set_speed":
                     self.set_speed(command.get("speed", 1.0))
                     
+                elif command.get("action") == "get_speed":
+                    # Return the current speed to the client
+                    self.socketio.emit("speed_update", {
+                        "speed": self.speed_factor
+                    })
+                    
                 elif command.get("action") == "seek" or command.get("action") == "set_position":
                     # Support both 'seek' and 'set_position' actions for compatibility
                     position = int(command.get("position", 0))
                     self.seek(position)
+                    
+                elif command.get("action") == "play_to_position":
+                    # Play until a specific position and then stop
+                    target_position = int(command.get("position", 0))
+                    auto_start = command.get("auto_start", False)
+                    self.play_to_position(target_position, auto_start=auto_start)
                     
                 # Send updated status immediately
                 self.socketio.emit("replay_status", {
@@ -1492,7 +1505,121 @@ class TradeLogReplayer:
             
             return True
         except Exception as e:
-            logger.error(f"Error seeking: {str(e)}")
+            logger.error(f"Error in seek: {str(e)}")
+            return False
+                
+    def play_to_position(self, target_position, auto_start=False):
+        """Play the replay until a specific position and then stop"""
+        try:
+            # Validate the target position
+            target_position = int(target_position)
+            target_position = max(0, min(len(self.trades) - 1, target_position))
+            
+            logger.info(f"Playing to position {target_position}/{len(self.trades)} (auto_start: {auto_start})")
+            
+            # Set a flag to indicate we're playing to a specific position
+            self.target_stop_position = target_position
+            
+            if auto_start:
+                logger.info("Auto-start is enabled, starting replay immediately")
+                # Make sure we're not paused
+                self.is_paused = False
+                
+                # Force stop any existing replay thread to ensure clean start
+                if hasattr(self, 'replay_thread') and self.replay_thread and self.replay_thread.is_alive():
+                    logger.info("Stopping existing replay thread")
+                    self.is_running = False
+                    time.sleep(0.2)  # Give the thread time to stop
+                
+                # Start a fresh replay
+                logger.info("Starting new replay thread")
+                self.is_running = True
+                self.replay_thread = threading.Thread(target=self.run_replay)
+                self.replay_thread.daemon = True
+                self.replay_thread.start()
+                logger.info("Replay thread started directly from play_to_position")
+                
+                # Send status update to clients
+                self.socketio.emit("replay_status", {
+                    "status": "playing",
+                    "running": self.is_running,
+                    "paused": self.is_paused,
+                    "position": self.current_position,
+                    "total": len(self.trades),
+                    "speed": self.speed_factor,
+                    "filename": os.path.basename(self.csv_file) if self.csv_file else ""
+                })
+            else:
+                # Just set the target position without starting
+                logger.info(f"Target position set to {target_position}, waiting for play command")
+            
+            # Start a background thread to monitor the position and stop when we reach the target
+            def monitor_position():
+                logger.info(f"Starting monitor thread for target position {self.target_stop_position}")
+                # Wait a moment to ensure the replay thread has started
+                time.sleep(0.5)
+                
+                # Check if the replay is actually running
+                if not self.is_running:
+                    logger.error("Monitor thread detected replay is not running, attempting to start it")
+                    self.is_running = True
+                    if not hasattr(self, 'replay_thread') or not self.replay_thread.is_alive():
+                        self.replay_thread = threading.Thread(target=self.run_replay)
+                        self.replay_thread.daemon = True
+                        self.replay_thread.start()
+                        logger.info("Replay thread started from monitor")
+                
+                # Monitor the position
+                start_time = time.time()
+                last_log_time = start_time
+                last_position = self.current_position
+                
+                while self.is_running and self.current_position < self.target_stop_position:
+                    # If paused, just wait
+                    if self.is_paused:
+                        time.sleep(0.1)
+                        continue
+                    
+                    # Check if position is advancing
+                    current_time = time.time()
+                    if current_time - last_log_time >= 1.0:  # Log every second
+                        position_change = self.current_position - last_position
+                        logger.info(f"Progress: {self.current_position}/{self.target_stop_position} (+{position_change} in 1s)")
+                        last_log_time = current_time
+                        last_position = self.current_position
+                        
+                        # If position hasn't changed in 3 seconds, there might be an issue
+                        if position_change == 0 and current_time - start_time > 3.0:
+                            logger.warning("Position not advancing, replay might be stuck")
+                    
+                    time.sleep(0.1)  # Check every 100ms
+                
+                # If we've reached or passed the target position, stop the replay
+                if self.is_running and self.current_position >= self.target_stop_position:
+                    logger.info(f"Reached target position {self.target_stop_position}, stopping replay")
+                    self.is_paused = True
+                    self.target_stop_position = None  # Reset target position
+                    
+                    # Send status update
+                    self.socketio.emit("replay_status", {
+                        "status": "paused",
+                        "running": self.is_running,
+                        "paused": self.is_paused,
+                        "position": self.current_position,
+                        "total": len(self.trades),
+                        "speed": self.speed_factor,
+                        "filename": os.path.basename(self.csv_file) if self.csv_file else ""
+                    })
+                else:
+                    logger.info(f"Monitor thread exiting without reaching target. Running: {self.is_running}, Position: {self.current_position}, Target: {self.target_stop_position}")
+            
+            # Start the monitoring thread
+            monitor_thread = threading.Thread(target=monitor_position, daemon=True)
+            monitor_thread.start()
+            logger.info("Monitor thread started")
+            
+        except Exception as e:
+            logger.error(f"Error in play_to_position: {str(e)}")
             return False
 
     def fast_forward(self, speed_factor):

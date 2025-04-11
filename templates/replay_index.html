@@ -230,6 +230,10 @@
             autoConnect: true
         };
         
+        // Global tracking variables
+        let currentPosition = 0;
+        let previousSpeed = 1.0; // Store the previous speed before setting to 2000x
+        
         const socket = io(socketOptions);
         
         // Socket connection event handlers
@@ -1111,7 +1115,48 @@ speedSlider.addEventListener('input', () => {
 
 positionSlider.addEventListener('change', () => {
     const position = parseInt(positionSlider.value);
-    socket.emit('replay_command', { action: 'seek', position: position });
+    console.log(`Position slider changed to ${position}`);
+    
+    // Store the current speed before changing it
+    socket.emit('replay_command', { action: 'get_speed' });
+    
+    // First, stop the current replay
+    socket.emit('replay_command', { action: 'stop' });
+    
+    // Use a longer delay to ensure stop completes
+    setTimeout(() => {
+        console.log('Seeking to position 0');
+        // Then, tell the server to seek to position 0 (beginning)
+        socket.emit('replay_command', { action: 'seek', position: 0 });
+        
+        // Use another delay to ensure seek completes
+        setTimeout(() => {
+            console.log('Setting speed to 2000x');
+            // Set speed to 2000x for fast replay
+            socket.emit('replay_command', { action: 'set_speed', speed: 2000 });
+            
+            // Use another delay to ensure speed is set
+            setTimeout(() => {
+                console.log(`Starting play to position ${position}`);
+                // Start playing
+                socket.emit('replay_command', { action: 'play' });
+                
+                // Start a client-side monitoring interval to check position
+                const checkInterval = setInterval(() => {
+                    if (currentPosition >= position) {
+                        console.log(`Reached target position ${position}, stopping`);
+                        socket.emit('replay_command', { action: 'pause' });
+                        
+                        // Restore the previous speed
+                        console.log(`Restoring previous speed: ${previousSpeed}x`);
+                        socket.emit('replay_command', { action: 'set_speed', speed: previousSpeed });
+                        
+                        clearInterval(checkInterval);
+                    }
+                }, 50); // Check every 50ms
+            }, 100);
+        }, 100);
+    }, 300);  // 300ms delay
 });
 
 // Handle replay status updates
@@ -1152,6 +1197,9 @@ socket.on('position_update', (data) => {
     positionSlider.value = data.position;
     positionValue.textContent = `${data.position}/${data.total}`;
     
+    // Update the global currentPosition variable
+    currentPosition = data.position;
+    
     // If position is 0, clear all charts
     if (data.position === 0) {
         console.log("Position set to 0 - clearing all charts");
@@ -1177,6 +1225,13 @@ socket.on('speed_update', (data) => {
     console.log('Speed update:', data);
     speedSlider.value = data.speed;
     speedValue.textContent = `${data.speed}x`;
+    
+    // Store the current speed as previous speed when we get an update
+    // Only store it if we're not already at 2000x (which would be our temporary speed)
+    if (data.speed !== 2000) {
+        previousSpeed = data.speed;
+        console.log(`Stored previous speed: ${previousSpeed}x`);
+    }
 });
     </script>
 </body>
