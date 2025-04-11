@@ -77,7 +77,9 @@
         <button id="stop-btn" class="control-btn">Stop</button>
         <div style="margin-left: 20px;">
             <label for="speed-slider">Speed: <span id="speed-value">1x</span></label>
-            <input type="range" id="speed-slider" min="1" max="1000" step="1" value="1">
+            <input type="range" id="speed-slider" min="1" max="10000" step="1" value="1">
+            <button id="turbo-btn" class="control-btn">TURBO (100,000x)</button>
+            <button id="max-speed-btn" class="control-btn">MAX SPEED (1,000,000x)</button>
         </div>
         <div style="margin-left: 20px; flex-grow: 1;">
             <label for="position-slider">Position: <span id="position-value">0/0</span></label>
@@ -101,6 +103,20 @@
     }
     .control-btn:hover {
         background-color: #45a049;
+    }
+    #turbo-btn {
+        background-color: #8e44ad;
+        font-weight: bold;
+    }
+    #turbo-btn:hover {
+        background-color: #9b59b6;
+    }
+    #max-speed-btn {
+        background-color: #c0392b;
+        font-weight: bold;
+    }
+    #max-speed-btn:hover {
+        background-color: #e74c3c;
     }
     .loading-container {
         display: none;
@@ -1054,6 +1070,8 @@ const pauseBtn = document.getElementById('pause-btn');
 const stopBtn = document.getElementById('stop-btn');
 const speedSlider = document.getElementById('speed-slider');
 const speedValue = document.getElementById('speed-value');
+const turboBtn = document.getElementById('turbo-btn');
+const maxSpeedBtn = document.getElementById('max-speed-btn');
 const positionSlider = document.getElementById('position-slider');
 const positionValue = document.getElementById('position-value');
 const filenameElement = document.getElementById('filename');
@@ -1069,6 +1087,26 @@ pauseBtn.addEventListener('click', () => {
 
 stopBtn.addEventListener('click', () => {
     socket.emit('replay_command', { action: 'stop' });
+});
+
+// Turbo speed button (100,000x)
+turboBtn.addEventListener('click', () => {
+    const turboSpeed = 100000;
+    speedValue.textContent = `${turboSpeed}x`;
+    socket.emit('replay_command', {
+        action: 'set_speed',
+        speed: turboSpeed
+    });
+});
+
+// Max speed button (1,000,000x)
+maxSpeedBtn.addEventListener('click', () => {
+    const maxSpeed = 1000000;
+    speedValue.textContent = `${maxSpeed}x`;
+    socket.emit('replay_command', {
+        action: 'set_speed',
+        speed: maxSpeed
+    });
 });
 
 speedSlider.addEventListener('input', () => {

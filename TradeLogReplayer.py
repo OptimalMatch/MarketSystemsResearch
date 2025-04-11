@@ -445,7 +445,7 @@ class TradeLogReplayer:
         except Exception as e:
             logger.error(f"Error emitting moving averages: {str(e)}")
     
-    def update_candlestick(self, trade):
+    def update_candlestick(self, trade, emit=True):
         """Update candlestick data with the trade"""
         try:
             # Get trade timestamp
@@ -501,23 +501,30 @@ class TradeLogReplayer:
                 candle['close'] = trade_price
             
             # Decide whether to emit an update
-            # For new candles or large price movements, emit right away
-            should_emit = new_candle or abs(trade_price - self.candlestick_data[-1]['open']) > 0.01
-            
-            # Emit candlestick updates with full refresh occasionally to ensure chart consistency
-            if should_emit:
-                # Every 20 updates, do a full refresh
-                full_refresh = new_candle and len(self.candlestick_data) % 20 == 0
-                self.emit_candlestick_update(full_refresh=full_refresh)
+            # Only emit if the emit parameter is True
+            if emit:
+                # For new candles or large price movements, emit right away
+                should_emit = new_candle or abs(trade_price - self.candlestick_data[-1]['open']) > 0.01
+                
+                # Emit candlestick updates with full refresh occasionally to ensure chart consistency
+                if should_emit:
+                    # Every 20 updates, do a full refresh
+                    full_refresh = new_candle and len(self.candlestick_data) % 20 == 0
+                    self.emit_candlestick_update(full_refresh=full_refresh)
             
             return new_candle
         except Exception as e:
             logger.error(f"Error updating candlestick: {str(e)}")
             return False
     
-    def update_orderbook(self, trade):
+    def update_orderbook(self, trade, emit=True):
         """Simulate orderbook updates based on trade data"""
         try:
+            # Skip orderbook updates at very high speeds unless explicitly requested
+            # Don't throttle too aggressively - only skip when not explicitly requested
+            if not emit:
+                return  # Skip if emit not requested
+                
             # Extract security_id from trade
             security_id = trade.get("security_id", "UNKNOWN")
             
@@ -534,15 +541,26 @@ class TradeLogReplayer:
             bids = []
             asks = []
             
-            # Create 10 levels of bids below the price
-            for i in range(1, 11):
+            # Adjust the number of levels based on speed for performance
+            if self.speed_factor > 5000:
+                # At very high speeds, use minimal levels
+                levels = 3
+            elif self.speed_factor > 1000:
+                # At high speeds, use fewer levels
+                levels = 5
+            else:
+                # At normal speeds, use full detail
+                levels = 10
+            
+            # Create levels of bids below the price
+            for i in range(1, levels + 1):
                 bid_price = trade_price - (spread * i)
                 # Generate somewhat random but realistic volumes
                 volume = int(100 / i) + random.randint(1, 50)
                 bids.append({"price": round(bid_price, 2), "size": volume})
             
-            # Create 10 levels of asks above the price
-            for i in range(1, 11):
+            # Create levels of asks above the price
+            for i in range(1, levels + 1):
                 ask_price = trade_price + (spread * i)
                 # Generate somewhat random but realistic volumes
                 volume = int(100 / i) + random.randint(1, 50)
@@ -559,49 +577,90 @@ class TradeLogReplayer:
                 "security_id": security_id
             }
             
-            # Emit the updated order book
-            self.socketio.emit("orderbook", self.order_book)
-            
-            # Also emit DOM data in the format expected by the chart
-            dom_data = {
-                "bids": [[bid["price"], bid["size"]] for bid in bids],
-                "asks": [[ask["price"], ask["size"]] for ask in asks],
-                "security_id": security_id
-            }
-            self.socketio.emit("depth_of_market", dom_data)
+            # Only emit if requested and throttle at high speeds
+            should_emit = False
+            if emit:
+                # At extreme speeds, only update occasionally but don't throttle too much
+                if self.speed_factor > 10000:
+                    should_emit = (self.current_position % 100 == 0)
+                # At high speeds, update less frequently
+                elif self.speed_factor > 1000:
+                    should_emit = (self.current_position % 20 == 0)
+                # At normal speeds, update regularly
+                else:
+                    should_emit = True
+                    
+                # Emit orderbook if needed
+                if should_emit:
+                    self.socketio.emit("orderbook", self.order_book)
+                    
+                    # Also emit DOM data in the format expected by the chart
+                    # Only prepare and send DOM data if we're emitting the orderbook
+                    dom_data = {
+                        "bids": [[bid["price"], bid["size"]] for bid in bids],
+                        "asks": [[ask["price"], ask["size"]] for ask in asks],
+                        "security_id": security_id
+                    }
+                    self.socketio.emit("depth_of_market", dom_data)
             
             # Log orderbook update for debugging
             logger.debug(f"Updated orderbook for {security_id} with bids: {len(bids)}, asks: {len(asks)}")
         except Exception as e:
             logger.error(f"Error updating orderbook: {str(e)}")
     
-    def emit_trade(self, trade):
-        """Emit a trade to the frontend"""
+    def emit_trade(self, trade, force_emit=False):
+        """Emit a trade to the frontend with speed-based throttling"""
         try:
+            # Skip excessive emissions at high speeds unless forced
+            # Use less aggressive throttling to ensure higher speeds are actually faster
+            if not force_emit and self.speed_factor > 10000:
+                # At extreme speeds, emit trades more frequently than before
+                if self.current_position % 100 != 0:
+                    return
+            elif not force_emit and self.speed_factor > 5000:
+                # At very high speeds, emit more frequently than before
+                if self.current_position % 50 != 0:
+                    return
+            elif not force_emit and self.speed_factor > 1000:
+                # At high speeds, emit more frequently than before
+                if self.current_position % 20 != 0:
+                    return
+                    
             # Convert trade to the format expected by the frontend
             trade_data = {
                 "id": trade["id"],
                 "time": int(time.time()),
                 "security_id": trade["security_id"],
                 "price": float(trade["price"]),
-                "size": float(trade["size"]),
-                "buyer_id": trade["buyer_id"],
-                "seller_id": trade["seller_id"]
+                "size": float(trade["size"])
             }
+            
+            # Only include buyer/seller IDs at lower speeds to reduce data size
+            if self.speed_factor < 1000:
+                trade_data["buyer_id"] = trade["buyer_id"]
+                trade_data["seller_id"] = trade["seller_id"]
             
             # Try to parse the timestamp from the trade - using standardized "time" field name
             try:
                 dt = datetime.fromisoformat(trade["time"].replace('Z', '+00:00'))
                 trade_data["time"] = int(dt.timestamp())
             except (ValueError, TypeError, KeyError) as e:
-                logger.debug(f"Could not parse trade time: {str(e)}, using system time")
+                # Don't log at high speeds to reduce overhead
+                if self.speed_factor < 1000:
+                    logger.debug(f"Could not parse trade time: {str(e)}, using system time")
                 pass
             
             # Emit trade to frontend
-            logger.debug(f"Emitting trade: {trade_data}")
+            if self.speed_factor < 1000:
+                logger.debug(f"Emitting trade: {trade_data}")
             self.socketio.emit("trade", trade_data)
             
             # Also emit as aggregated trade for volume chart
+            # At high speeds, only emit aggregated trades occasionally but not too aggressively
+            if self.speed_factor > 5000:
+                if self.current_position % 50 != 0:
+                    return
+                    
             aggregated_trade = {
                 "time": trade_data["time"],
                 "security_id": trade_data["security_id"],
@@ -610,7 +669,9 @@ class TradeLogReplayer:
                 "count": 1,
                 "incremental": True
             }
-            logger.debug(f"Emitting aggregated trade: {aggregated_trade}")
+            
+            if self.speed_factor < 1000:
+                logger.debug(f"Emitting aggregated trade: {aggregated_trade}")
             self.socketio.emit("aggregated_trade", aggregated_trade)
             
         except Exception as e:
@@ -1044,13 +1105,69 @@ class TradeLogReplayer:
                     time.sleep(0.1)
                     continue
                 
-                # Process trades based on speed factor
-                if self.speed_factor > 10000:
+                # Process trades based on speed factor - use more aggressive processing for higher speeds
+                if self.speed_factor > 100000:
                     # Use fast forward for extreme speeds
                     self.fast_forward(self.speed_factor)
                     # After fast-forwarding, if we've reached the end, break
                     if self.current_position >= len(self.trades):
                         break
+                    
+                # For high speeds (10,000-100,000), use batch processing
+                elif self.speed_factor > 10000:
+                    # Process multiple trades at once without emitting each one
+                    # Scale batch size more aggressively with speed
+                    batch_size = int(self.speed_factor / 10)  # 10x larger batches
+                    end_position = min(self.current_position + batch_size, len(self.trades))
+                    
+                    # Process the batch of trades
+                    for i in range(self.current_position, end_position):
+                        self.current_position = i
+                        trade = self.trades[i]
+                        # Only process every Nth trade for efficiency
+                        if i % 10 == 0:
+                            self.update_candlestick(trade, emit=False)  # Update without emitting
+                    
+                    # Emit only the final state after batch processing
+                    if len(self.candlestick_data) > 0:
+                        self.emit_candlestick_update(full_refresh=(self.current_position % 1000 == 0))
+                    
+                    # Update position for UI
+                    self.socketio.emit("position_update", {
+                        "position": self.current_position,
+                        "total": len(self.trades)
+                    })
+                    
+                    # No sleep to maximize speed
+                    continue  # Skip the normal processing below
+                    
+                # For medium-high speeds (1,000-10,000), use smaller batch processing
+                elif self.speed_factor > 1000:
+                    # Process multiple trades at once without emitting each one
+                    batch_size = int(self.speed_factor / 20)  # Scale batch size with speed
+                    end_position = min(self.current_position + batch_size, len(self.trades))
+                    
+                    # Process the batch of trades
+                    for i in range(self.current_position, end_position):
+                        self.current_position = i
+                        trade = self.trades[i]
+                        # Only process every 5th trade for efficiency
+                        if i % 5 == 0:
+                            self.update_candlestick(trade, emit=False)  # Update without emitting
+                    
+                    # Emit only the final state after batch processing
+                    if len(self.candlestick_data) > 0:
+                        self.emit_candlestick_update(full_refresh=(self.current_position % 500 == 0))
+                    
+                    # Update position for UI
+                    self.socketio.emit("position_update", {
+                        "position": self.current_position,
+                        "total": len(self.trades)
+                    })
+                    
+                    # Very minimal sleep
+                    time.sleep(0.0001)
+                    continue  # Skip the normal processing below
                 
                 # Get current trade
                 trade = self.trades[self.current_position]
@@ -1081,7 +1198,14 @@ class TradeLogReplayer:
                     )
                     
                     # Emit trade data to UI with throttling based on speed
-                    emit_throttle = max(1, min(int(self.speed_factor / 5), 1000))
+                    # More aggressive throttling at higher speeds
+                    if self.speed_factor <= 100:
+                        emit_throttle = max(1, int(self.speed_factor / 2))
+                    elif self.speed_factor <= 1000:
+                        emit_throttle = max(10, int(self.speed_factor / 3))
+                    else:
+                        emit_throttle = max(100, int(self.speed_factor / 4))
+                        
                     if self.current_position % emit_throttle == 0:
                         self.emit_trade(trade)
                     
@@ -1193,8 +1317,8 @@ class TradeLogReplayer:
         """Set the replay speed factor"""
         try:
             # Clamp speed to reasonable values but allow much higher speeds
-            # Increased from 100000 to 1000000 to support extreme speeds
-            speed_factor = max(0.1, min(1000000, float(speed_factor)))
+            # Increased from 1000000 to 10000000 to support even more extreme speeds
+            speed_factor = max(0.1, min(10000000, float(speed_factor)))
             self.speed_factor = speed_factor
             logger.info(f"Set replay speed to {speed_factor}x")
             
@@ -1345,13 +1469,16 @@ class TradeLogReplayer:
         """Fast forward through trades at extreme speeds"""
         logger.info(f"Fast forwarding at {speed_factor}x speed")
         
-        # Calculate how many trades to skip based on speed
-        if speed_factor > 100000:
-            # For extreme speeds (>100K), jump massive chunks
-            jump_size = min(100000, len(self.trades) // 10)
+        # Calculate how many trades to skip based on speed - more aggressive jumps
+        if speed_factor > 1000000:
+            # For extreme speeds (>1M), jump massive chunks
+            jump_size = min(2000000, len(self.trades) // 3)
+        elif speed_factor > 100000:
+            # For very high speeds (100K-1M), process in large batches
+            jump_size = min(200000, len(self.trades) // 5)
         else:
-            # For very high speeds (10K-100K), process in big batches
-            jump_size = min(10000, len(self.trades) // 20)
+            # For high speeds (10K-100K), process in moderate batches
+            jump_size = min(20000, len(self.trades) // 10)
             
         # Calculate target position with bounds checking
         target_position = min(self.current_position + jump_size, len(self.trades) - 1)
@@ -1363,13 +1490,36 @@ class TradeLogReplayer:
         # Log the jump
         logger.info(f"Fast forwarding from position {self.current_position} to {target_position}")
         
+        # Process key trades along the way to maintain data integrity
+        # For extremely high speeds, we'll sample trades at regular intervals but more sparsely
+        if jump_size > 100000:
+            # For very large jumps, take only 5 samples to minimize processing
+            sample_interval = max(1, (target_position - self.current_position) // 5)
+            
+            # Process sampled trades to maintain chart continuity
+            for sample_pos in range(self.current_position, target_position, sample_interval):
+                if sample_pos < len(self.trades):
+                    sample_trade = self.trades[sample_pos]
+                    # Update candlestick without emitting to client
+                    self.update_candlestick(sample_trade, emit=False)
+        elif jump_size > 10000:
+            # For large jumps, take 8 samples
+            sample_interval = max(1, (target_position - self.current_position) // 8)
+            
+            # Process sampled trades to maintain chart continuity
+            for sample_pos in range(self.current_position, target_position, sample_interval):
+                if sample_pos < len(self.trades):
+                    sample_trade = self.trades[sample_pos]
+                    # Update candlestick without emitting to client
+                    self.update_candlestick(sample_trade, emit=False)
+        
         # Get the trade at the target position for updating the UI
         if target_position < len(self.trades):
             target_trade = self.trades[target_position]
             
-            # Update visualization with the target trade
-            self.emit_trade(target_trade)
-            self.update_candlestick(target_trade)
+            # Update visualization with the target trade - force emit
+            self.emit_trade(target_trade, force_emit=True)
+            self.update_candlestick(target_trade, emit=True)
             
             # Log that we jumped
             logger.info(f"Updated charts with trade at position {target_position}")
