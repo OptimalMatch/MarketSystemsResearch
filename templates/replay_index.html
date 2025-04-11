@@ -77,7 +77,7 @@
         <button id="stop-btn" class="control-btn">Stop</button>
         <div style="margin-left: 20px;">
             <label for="speed-slider">Speed: <span id="speed-value">1x</span></label>
-            <input type="range" id="speed-slider" min="1" max="500" step="1" value="1">
+            <input type="range" id="speed-slider" min="1" max="100" step="1" value="1">
         </div>
         <div style="margin-left: 20px; flex-grow: 1;">
             <label for="position-slider">Position: <span id="position-value">0/0</span></label>
@@ -363,13 +363,33 @@
             
             try {
                 // Format the data correctly for the chart
-                const formattedData = data.map(candle => ({
-                    time: typeof candle.time === 'number' ? candle.time : parseInt(candle.time),
-                    open: parseFloat(candle.open),
-                    high: parseFloat(candle.high),
-                    low: parseFloat(candle.low),
-                    close: parseFloat(candle.close)
-                }));
+                const formattedData = data.map(candle => {
+                    // Ensure all required fields have valid numeric values
+                    const time = typeof candle.time === 'number' ? candle.time : parseInt(candle.time || 0);
+                    const open = parseFloat(candle.open || 0);
+                    const high = parseFloat(candle.high || 0);
+                    const low = parseFloat(candle.low || 0);
+                    const close = parseFloat(candle.close || 0);
+                    
+                    // Skip invalid candles (e.g., with time=0)
+                    if (time <= 0 || isNaN(time)) {
+                        return null;
+                    }
+                    
+                    return {
+                        time,
+                        open,
+                        high,
+                        low,
+                        close
+                    };
+                }).filter(candle => candle !== null); // Filter out null entries
+                
+                // Skip if we don't have valid data after filtering
+                if (formattedData.length === 0) {
+                    console.warn("No valid candlestick data after formatting");
+                    return;
+                }
                 
                 //console.log("Setting candlestick data:", formattedData);
                 candlestickSeries.setData(formattedData);
@@ -398,13 +418,27 @@
                 //console.log("Received candlestick update:", data);
                 
                 // Format data properly regardless of update type
-                const formattedCandles = (data.candles || []).map(candle => ({
-                    time: typeof candle.time === 'number' ? candle.time : parseInt(candle.time),
-                    open: parseFloat(candle.open),
-                    high: parseFloat(candle.high),
-                    low: parseFloat(candle.low),
-                    close: parseFloat(candle.close)
-                }));
+                const formattedCandles = (data.candles || []).map(candle => {
+                    // Ensure all required fields have valid numeric values
+                    const time = typeof candle.time === 'number' ? candle.time : parseInt(candle.time || 0);
+                    const open = parseFloat(candle.open || 0);
+                    const high = parseFloat(candle.high || 0);
+                    const low = parseFloat(candle.low || 0);
+                    const close = parseFloat(candle.close || 0);
+                    
+                    // Skip invalid candles
+                    if (time <= 0 || isNaN(time)) {
+                        return null;
+                    }
+                    
+                    return {
+                        time,
+                        open,
+                        high,
+                        low,
+                        close
+                    };
+                }).filter(candle => candle !== null); // Filter out null entries
                 
                 // Sort by time to ensure proper order
                 formattedCandles.sort((a, b) => a.time - b.time);
@@ -418,6 +452,21 @@
                     if (data.candles[0] && data.candles[0].security_id) {
                         securityId.textContent = data.candles[0].security_id;
                     }
+                    
+                    // Also update the price series with the same data
+                    try {
+                        // Convert candlestick data to price line data
+                        const priceData = formattedCandles.map(candle => ({
+                            time: candle.time,
+                            value: candle.close
+                        }));
+                        
+                        // Always use setData to avoid timeline conflicts
+                        //console.log("Setting price data:", priceData);
+                        priceSeries.setData(priceData);
+                    } catch (priceError) {
+                        console.error("Error updating price series:", priceError);
+                    }
                 }
             } catch (e) {
                 console.error("Error updating candlestick:", e);
@@ -427,12 +476,93 @@
         // Order book
         socket.on('orderbook', (data) => {
             const orderbookDiv = document.getElementById('orderbook');
+            if (!orderbookDiv) return;
             orderbookDiv.innerHTML = `
                 <h3>Bids</h3>
                 <ul id="orderbookbids">${data.bids.map(order => `<li>${order.price} @ ${order.size}</li>`).join('')}</ul>
                 <h3>Asks</h3>
                 <ul id="orderbookasks">${data.asks.map(order => `<li>${order.price} @ ${order.size}</li>`).join('')}</ul>
             `;
+        });
+
+        // Listen for trade updates - handles all trade data updates
+        socket.on('trade', function(data) {
+            // Validate we have meaningful data before processing
+            if (!data) {
+                console.warn("Received null or undefined trade data");
+                return;
+            }
+            
+            try {
+                // Safely parse numeric values with defaults
+                const price = data.price ? parseFloat(data.price) : 0;
+                const size = data.size ? parseFloat(data.size) : 0;
+                const total = price * size;
+                
+                // Make sure all DOM element references are defined
+                // Trade info display elements
+                const priceValue = document.getElementById('price-value') || document.createElement('span');
+                const sizeValue = document.getElementById('size-value') || document.createElement('span');
+                const totalValue = document.getElementById('total-value') || document.createElement('span');
+                const sideValue = document.getElementById('side-value') || document.createElement('span');
+                const timeValue = document.getElementById('time-value') || document.createElement('span');
+                const securityId = document.getElementById('security-id') || document.createElement('span');
+                
+                // Trade statistics elements
+                const lastPriceValue = document.getElementById('last-price') || document.createElement('span');
+                const highValue = document.getElementById('high-value') || document.createElement('span');
+                const lowValue = document.getElementById('low-value') || document.createElement('span');
+                const volumeValue = document.getElementById('volume-value') || document.createElement('span');
+                const openValue = document.getElementById('open-value') || document.createElement('span');
+                const closeValue = document.getElementById('close-value') || document.createElement('span');
+                
+                // Update price display if we have valid price data
+                if (!isNaN(price) && price > 0) {
+                    priceValue.textContent = price.toFixed(2);
+                    
+                    // Also update the last price display
+                    lastPriceValue.textContent = price.toFixed(2);
+                }
+                
+                // Update size and total with safety checks
+                if (!isNaN(size)) {
+                    sizeValue.textContent = size.toFixed(2);
+                    
+                    if (!isNaN(total)) {
+                        totalValue.textContent = total.toFixed(2);
+                    }
+                }
+                
+                // Update other trade info
+                if (data.side) {
+                    sideValue.textContent = data.side;
+                    sideValue.className = data.side.toLowerCase() === 'buy' ? 'buy-side' : 'sell-side';
+                }
+                
+                // Update security ID from trade
+                if (data.security_id) {
+                    securityId.textContent = data.security_id;
+                }
+                
+                // Update trade timestamp display
+                if (data.time) {
+                    try {
+                        const tradeTime = new Date(data.time);
+                        if (!isNaN(tradeTime.getTime())) { // Valid date check
+                            timeValue.textContent = tradeTime.toLocaleTimeString();
+                        } else {
+                            timeValue.textContent = new Date().toLocaleTimeString();
+                        }
+                    } catch (timeError) {
+                        console.error("Error parsing trade time:", timeError);
+                        timeValue.textContent = new Date().toLocaleTimeString();
+                    }
+                } else {
+                    timeValue.textContent = new Date().toLocaleTimeString();
+                }
+            } catch (e) {
+                console.error("Error processing trade data:", e, data);
+            }
         });
 
         // Maintain a local array of markers
@@ -532,7 +662,7 @@
 
         // Listen for moving average updates
         socket.on('moving_averages', function(data) {
-            console.log('Received moving averages:', data);
+            //console.log('Received moving averages:', data);
             
             if (data && data.length > 0) {
                 // Update each SMA series
@@ -552,108 +682,6 @@
                         }
                     }
                 });
-            }
-        });
-        
-        // Extract price data from candlesticks for the price series
-        socket.on('candlestick_update', function(data) {
-            if (data && data.candles && data.candles.length > 0) {
-                try {
-                    // Convert candlestick data to price line data
-                    const priceData = data.candles.map(candle => ({
-                        time: typeof candle.time === 'number' ? candle.time : parseInt(candle.time),
-                        value: parseFloat(candle.close)
-                    }));
-                    
-                    // Sort by time to ensure proper order
-                    priceData.sort((a, b) => a.time - b.time);
-                    
-                    // Always use setData to avoid timeline conflicts
-                    //console.log("Setting price data:", priceData);
-                    priceSeries.setData(priceData);
-                } catch (e) {
-                    console.error("Error updating price series:", e);
-                }
-            }
-        });
-        
-        // Listen for trade updates - handles all trade data updates
-        socket.on('trade', function(data) {
-            // Validate we have meaningful data before processing
-            if (!data) {
-                console.warn("Received null or undefined trade data");
-                return;
-            }
-            
-            try {
-                // Safely parse numeric values with defaults
-                const price = data.price ? parseFloat(data.price) : 0;
-                const size = data.size ? parseFloat(data.size) : 0;
-                const total = price * size;
-                
-                // Make sure all DOM element references are defined
-                // Trade info display elements
-                const priceValue = document.getElementById('price-value') || document.createElement('span');
-                const sizeValue = document.getElementById('size-value') || document.createElement('span');
-                const totalValue = document.getElementById('total-value') || document.createElement('span');
-                const sideValue = document.getElementById('side-value') || document.createElement('span');
-                const timeValue = document.getElementById('time-value') || document.createElement('span');
-                const securityId = document.getElementById('security-id') || document.createElement('span');
-                
-                // Trade statistics elements
-                const lastPriceValue = document.getElementById('last-price') || document.createElement('span');
-                const highValue = document.getElementById('high-value') || document.createElement('span');
-                const lowValue = document.getElementById('low-value') || document.createElement('span');
-                const volumeValue = document.getElementById('volume-value') || document.createElement('span');
-                const openValue = document.getElementById('open-value') || document.createElement('span');
-                const closeValue = document.getElementById('close-value') || document.createElement('span');
-                
-                // Update price display if we have valid price data
-                if (!isNaN(price) && price > 0) {
-                    priceValue.textContent = price.toFixed(2);
-                    
-                    // Also update the last price display
-                    lastPriceValue.textContent = price.toFixed(2);
-                }
-                
-                // Update size and total with safety checks
-                if (!isNaN(size)) {
-                    sizeValue.textContent = size.toFixed(2);
-                    
-                    if (!isNaN(total)) {
-                        totalValue.textContent = total.toFixed(2);
-                    }
-                }
-                
-                // Update other trade info
-                if (data.side) {
-                    sideValue.textContent = data.side;
-                    sideValue.className = data.side.toLowerCase() === 'buy' ? 'buy-side' : 'sell-side';
-                }
-                
-                // Update security ID from trade
-                if (data.security_id) {
-                    securityId.textContent = data.security_id;
-                }
-                
-                // Update trade timestamp display
-                if (data.time) {
-                    try {
-                        const tradeTime = new Date(data.time);
-                        if (!isNaN(tradeTime.getTime())) { // Valid date check
-                            timeValue.textContent = tradeTime.toLocaleTimeString();
-                        } else {
-                            timeValue.textContent = new Date().toLocaleTimeString();
-                        }
-                    } catch (timeError) {
-                        console.error("Error parsing trade time:", timeError);
-                        timeValue.textContent = new Date().toLocaleTimeString();
-                    }
-                } else {
-                    timeValue.textContent = new Date().toLocaleTimeString();
-                }
-            } catch (e) {
-                console.error("Error processing trade data:", e, data);
             }
         });
         
