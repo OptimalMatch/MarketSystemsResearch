@@ -12,6 +12,13 @@ services:
       - PORT=12084
       - DEBUG=False
       - PYTHONUNBUFFERED=1
+      # Configure securities (choose one method):
+      # Method 1: Comma-separated list
+      # - SECURITIES=AAPL,BTC,DEC
+      # Method 2: Individual securities
+      # - SECURITY_1=AAPL
+      # - SECURITY_2=BTC
+      # - SECURITY_3=DEC
     volumes:
       - ./logs:/app/logs
       - ./trades_logs:/app/trades_logs

@@ -175,3 +175,5 @@ cython_debug/
 
 #PyCharm
 .idea/*
+# Local configuration
+docker-compose.override.yml

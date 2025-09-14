@@ -1,0 +1,20 @@
+# Example docker-compose.override.yml for cryptocurrency trading
+# Copy this file to docker-compose.override.yml and uncomment the desired configuration
+
+services:
+  market-viz:
+    environment:
+      # Example 1: Trade only cryptocurrencies
+      - SECURITIES=BTC,DEC
+
+      # Example 2: Mix of stocks and cryptocurrencies
+      # - SECURITIES=AAPL,BTC,DEC
+
+      # Example 3: Using individual security variables
+      # - SECURITY_1=BTC
+      # - SECURITY_2=DEC
+      # - SECURITY_3=ETH
+
+      # Adjust market maker funds if needed for crypto prices
+      # - MARKET_MAKER_CASH=10000000000
+      # - MARKET_MAKER_SECURITIES=10000

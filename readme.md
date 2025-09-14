@@ -24,6 +24,22 @@ docker-compose down
 
 3. Open your browser to [http://localhost:12084/](http://localhost:12084/)
 
+#### Configuring Securities
+
+You can configure which securities to trade using environment variables:
+
+```bash
+# Method 1: Using docker-compose.override.yml (recommended)
+cp docker-compose.override.example.yml docker-compose.override.yml
+# Edit the file to select your securities
+
+# Method 2: Using environment variables directly
+docker-compose run -e SECURITIES=BTC,DEC market-viz
+
+# Method 3: Using individual security variables
+docker-compose run -e SECURITY_1=BTC -e SECURITY_2=ETH -e SECURITY_3=DEC market-viz
+```
+
 #### Additional Docker Services
 
 ```bash

@@ -29,28 +29,45 @@ class MarketServer:
         self.market = Market()
         self.is_running = True
         self.setup_signal_handlers()
-        
+
+        # Get securities from environment or use defaults
+        self.securities = self._get_securities_list()
+        logger.info(f"Initializing market with securities: {self.securities}")
+
         # Initialize visualization
         self.visualization = Visualization(self.market)
         self.market.visualization = self.visualization
-        
+
+        # Initialize orderbooks for all securities
+        for security in self.securities:
+            self.market.create_orderbook(security)
+            logger.info(f"Created orderbook for {security}")
+
         # Start market maker
         self.market_maker = MarketMaker(
-            self.market, 
-            Config.MARKET_MAKER_ID, 
-            [Config.DEFAULT_SECURITY]
+            self.market,
+            Config.MARKET_MAKER_ID,
+            self.securities
         )
         self.market.deposit(self.market_maker.maker_id, 'cash', Decimal(Config.MARKET_MAKER_CASH))
-        self.market.deposit(self.market_maker.maker_id, Config.DEFAULT_SECURITY, Decimal(Config.MARKET_MAKER_SECURITIES))
+
+        # Deposit securities for market maker
+        for security in self.securities:
+            self.market.deposit(self.market_maker.maker_id, security, Decimal(Config.MARKET_MAKER_SECURITIES))
+            logger.info(f"Deposited {Config.MARKET_MAKER_SECURITIES} {security} for market maker")
+
         self.market_maker.start()
         
         # Start market rush simulator with higher throughput
+        # Use first security as the primary for simulation, or the default
+        primary_security = self.securities[0] if self.securities else Config.DEFAULT_SECURITY
         self.rush_simulator = MarketRushSimulator(
             market=self.market,
-            security_id=Config.DEFAULT_SECURITY,
+            security_id=primary_security,
             num_participants=Config.NUM_PARTICIPANTS,
             enable_simulated_sellers=Config.ENABLE_SIMULATED_SELLERS
         )
+        logger.info(f"Market simulator using primary security: {primary_security}")
         # Configure simulator parameters for maximum throughput
         self.rush_simulator.batch_size = 500  # Increased from 200
         self.rush_simulator.worker_threads = 400  # Increased from 200
@@ -73,6 +90,30 @@ class MarketServer:
         
         # Start monitoring loop
         self.start_monitoring()
+
+    def _get_securities_list(self):
+        """Get list of securities from environment or config."""
+        # Check for SECURITIES environment variable (comma-separated list)
+        securities_env = os.getenv('SECURITIES', '')
+
+        if securities_env:
+            # Parse comma-separated list
+            securities = [s.strip() for s in securities_env.split(',') if s.strip()]
+            if securities:
+                return securities
+
+        # Check for individual SECURITY_N environment variables (up to 10)
+        securities = []
+        for i in range(1, 11):
+            security = os.getenv(f'SECURITY_{i}')
+            if security:
+                securities.append(security)
+
+        if securities:
+            return securities
+
+        # Fall back to config default
+        return [Config.DEFAULT_SECURITY]
 
     def setup_signal_handlers(self):
         """Set up handlers for graceful shutdown."""
