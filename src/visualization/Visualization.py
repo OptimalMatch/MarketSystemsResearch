@@ -28,7 +28,11 @@ class Visualization:
         self.candlestick_data = []
         self.band_data = []  # Store SMA data for bands
         self.markers = []  # To store emitted markers
-        self.app = Flask(__name__)
+        import os
+        # Get the root directory (2 levels up from this file)
+        root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        template_dir = os.path.join(root_dir, 'templates')
+        self.app = Flask(__name__, template_folder=template_dir)
         CORS(self.app)  # Enable CORS for all routes
         self.socketio = SocketIO(
             self.app,
@@ -71,7 +75,7 @@ class Visualization:
         def serve_js(filename):
             """Serve JavaScript files from templates directory."""
             try:
-                return send_from_directory('templates', filename)
+                return send_from_directory(template_dir, filename)
             except Exception as e:
                 logger.error(f"Error serving static file {filename}: {str(e)}")
                 return "File not found", 404
