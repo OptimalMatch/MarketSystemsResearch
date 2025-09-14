@@ -1,6 +1,6 @@
 # Core Domain Models
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 from decimal import Decimal
 from enum import Enum
@@ -12,6 +12,7 @@ class SecurityType(Enum):
     BOND = "bond"
     ETF = "etf"
     DERIVATIVE = "derivative"
+    CRYPTOCURRENCY = "cryptocurrency"
 
 
 class Security:
@@ -23,7 +24,10 @@ class Security:
             security_type: SecurityType,
             ticker: str,
             name: str,
-            current_price: Decimal
+            current_price: Decimal,
+            decimals: int = 2,
+            min_order_size: Decimal = Decimal('1'),
+            tick_size: Decimal = Decimal('0.01')
     ):
         self.id = id
         self.cusip = cusip
@@ -32,7 +36,40 @@ class Security:
         self.ticker = ticker
         self.name = name
         self.current_price = current_price
+        self.decimals = decimals
+        self.min_order_size = min_order_size
+        self.tick_size = tick_size
         self.last_updated = datetime.utcnow()
+
+    @classmethod
+    def create_cryptocurrency(cls, ticker: str, name: str, current_price: Decimal, decimals: int = 8):
+        return cls(
+            id=ticker,
+            cusip="",  # Cryptocurrencies don't have CUSIP
+            isin="",   # Cryptocurrencies don't have ISIN
+            security_type=SecurityType.CRYPTOCURRENCY,
+            ticker=ticker,
+            name=name,
+            current_price=current_price,
+            decimals=decimals,
+            min_order_size=Decimal('0.00000001'),
+            tick_size=Decimal('0.00000001')
+        )
+
+    @classmethod
+    def create_stock(cls, ticker: str, name: str, current_price: Decimal, cusip: str = "", isin: str = ""):
+        return cls(
+            id=ticker,
+            cusip=cusip,
+            isin=isin,
+            security_type=SecurityType.EQUITY,
+            ticker=ticker,
+            name=name,
+            current_price=current_price,
+            decimals=2,
+            min_order_size=Decimal('1'),
+            tick_size=Decimal('0.01')
+        )
 
 
 class Position:
@@ -189,10 +226,14 @@ class LendingService:
 
 # API Layer
 
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-
-app = FastAPI()
+try:
+    from fastapi import FastAPI, HTTPException
+    from pydantic import BaseModel
+    app = FastAPI()
+except ImportError:
+    # FastAPI not installed, skip API layer
+    app = None
+    BaseModel = object
 
 
 class CreateLoanRequest(BaseModel):
@@ -204,33 +245,34 @@ class CreateLoanRequest(BaseModel):
     duration_days: int
 
 
-@app.post("/api/v1/loans")
-async def create_loan(request: CreateLoanRequest):
-    loan_id = await lending_service.create_loan_agreement(
-        request.lender_id,
-        request.borrower_id,
-        request.security_id,
-        request.quantity,
-        request.rate,
-        request.duration_days
-    )
+if app:
+    @app.post("/api/v1/loans")
+    async def create_loan(request: CreateLoanRequest):
+        loan_id = await lending_service.create_loan_agreement(
+            request.lender_id,
+            request.borrower_id,
+            request.security_id,
+            request.quantity,
+            request.rate,
+            request.duration_days
+        )
 
-    if not loan_id:
-        raise HTTPException(status_code=400, detail="Insufficient available positions")
+        if not loan_id:
+            raise HTTPException(status_code=400, detail="Insufficient available positions")
 
-    return {"loan_id": loan_id}
-
-
-@app.get("/api/v1/positions/{owner_id}")
-async def get_positions(owner_id: str):
-    positions = await position_repository.get_positions_by_owner(owner_id)
-    return {"positions": positions}
+        return {"loan_id": loan_id}
 
 
-@app.get("/api/v1/loans/{participant_id}")
-async def get_active_loans(participant_id: str):
-    loans = await loan_repository.get_active_loans(participant_id)
-    return {"loans": loans}
+    @app.get("/api/v1/positions/{owner_id}")
+    async def get_positions(owner_id: str):
+        positions = await position_repository.get_positions_by_owner(owner_id)
+        return {"positions": positions}
+
+
+    @app.get("/api/v1/loans/{participant_id}")
+    async def get_active_loans(participant_id: str):
+        loans = await loan_repository.get_active_loans(participant_id)
+        return {"loans": loans}
 
 
 # Requirements (save as requirements.txt):

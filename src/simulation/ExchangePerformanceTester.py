@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict
 import statistics
 from dataclasses import dataclass
-from Exchange import Market, OrderSide
+from src.core.Exchange import Market, OrderSide
 
 
 @dataclass

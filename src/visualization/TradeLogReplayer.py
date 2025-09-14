@@ -23,8 +23,8 @@ from flask import send_from_directory, Flask, render_template, send_file
 from flask_socketio import SocketIO
 from flask_cors import CORS
 
-from config import Config
-from logger import setup_logger
+from src.utils.config import Config
+from src.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 

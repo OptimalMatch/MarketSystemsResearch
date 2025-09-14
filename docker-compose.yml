@@ -1,0 +1,110 @@
+services:
+  # Main market visualization server
+  market-viz:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: market-viz-server
+    ports:
+      - "12084:12084"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=12084
+      - DEBUG=False
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./logs:/app/logs
+      - ./trades_logs:/app/trades_logs
+    networks:
+      - market-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:12084/').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Trade log replayer service (optional, can be started separately)
+  trade-replayer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: trade-replayer
+    command: ["python", "run_replayer.py", "sample_trade_log.csv", "--port", "12085"]
+    ports:
+      - "12085:12085"
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./logs:/app/logs
+      - ./trades_logs:/app/trades_logs
+    networks:
+      - market-network
+    profiles:
+      - replayer
+    depends_on:
+      - market-viz
+
+  # Market simulator with cryptocurrency support
+  market-simulator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: market-simulator
+    command: ["python", "run_simulator.py"]
+    environment:
+      - PYTHONUNBUFFERED=1
+      - SIMULATION_DURATION=300
+      - NUM_PARTICIPANTS=10000
+    volumes:
+      - ./logs:/app/logs
+      - ./trades_logs:/app/trades_logs
+    networks:
+      - market-network
+    profiles:
+      - simulator
+    depends_on:
+      - market-viz
+
+  # Cryptocurrency trading test
+  crypto-test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: crypto-test
+    command: ["python", "run_tests.py", "--test", "crypto"]
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - market-network
+    profiles:
+      - test
+    depends_on:
+      - market-viz
+
+  # Performance tester
+  performance-test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: performance-test
+    command: ["python", "run_tests.py", "--test", "performance"]
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - market-network
+    profiles:
+      - performance
+
+networks:
+  market-network:
+    driver: bridge
+
+volumes:
+  logs:
+  trades_logs:

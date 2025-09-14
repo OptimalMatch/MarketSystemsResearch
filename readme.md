@@ -2,6 +2,49 @@
 [![Watch the demo video](docs/images/screenshot_home.png)](https://youtu.be/dc28jhKj8og?hd=1 "Demo")
 
 ## Installation and Running
+
+### Option 1: Using Docker (Recommended)
+
+1. Clone this repository
+
+2. Build and run with Docker Compose:
+```bash
+# Start the main visualization server
+docker-compose up -d
+
+# Or build fresh and start
+docker-compose up --build -d
+
+# View logs
+docker-compose logs -f market-viz
+
+# Stop services
+docker-compose down
+```
+
+3. Open your browser to [http://localhost:12084/](http://localhost:12084/)
+
+#### Additional Docker Services
+
+```bash
+# Run the trade replayer (on port 12085)
+docker-compose --profile replayer up -d trade-replayer
+
+# Run the market simulator
+docker-compose --profile simulator up -d market-simulator
+
+# Run cryptocurrency trading tests
+docker-compose --profile test up crypto-test
+
+# Run performance tests
+docker-compose --profile performance up performance-test
+
+# Run all services
+docker-compose --profile replayer --profile simulator up -d
+```
+
+### Option 2: Local Python Environment
+
 1. Clone this repository
 
 2. Set up Python environment:
@@ -19,17 +62,55 @@ pip install -r requirements.txt
 
 3. Run the visualization server:
 ```bash
-python VisualServer.py
+python main.py
 ```
 
-4. Open your browser to [http://localhost:8084/](http://localhost:8084/)
+4. Open your browser to [http://localhost:12084/](http://localhost:12084/)
 
 
 # Exchange System Design Document
 
+## Project Structure
+
+```
+MarketSystemsResearch/
+├── src/
+│   ├── core/              # Core exchange and securities platform
+│   │   ├── Exchange.py
+│   │   └── SecuritiesPlatform.py
+│   ├── market/            # Market maker and simulation
+│   │   ├── MarketMaker.py
+│   │   └── MarketRushSimulator.py
+│   ├── visualization/     # Web interface and visualization
+│   │   ├── Visualization.py
+│   │   ├── VisualServer.py
+│   │   └── TradeLogReplayer.py
+│   ├── simulation/        # Performance testing
+│   │   └── ExchangePerformanceTester.py
+│   ├── utils/            # Configuration and logging
+│   │   ├── config.py
+│   │   └── logger.py
+│   └── tests/            # Test suites
+│       ├── test.py
+│       └── test_crypto.py
+├── templates/            # HTML templates
+├── docs/                # Documentation
+├── main.py              # Main entry point
+├── run_simulator.py     # Market simulator entry point
+├── run_replayer.py      # Trade replayer entry point
+├── run_tests.py         # Test runner
+├── Dockerfile           # Container definition
+└── docker-compose.yml   # Service orchestration
+```
+
 ## 1. System Overview
 
-The Exchange System is a Python-based implementation of a security trading platform that supports order matching, balance management, and trade settlement. The system implements a price-time priority matching algorithm and maintains separate orderbooks for different securities.
+The Exchange System is a Python-based implementation of a security trading platform that supports order matching, balance management, and trade settlement for multiple asset types including stocks and cryptocurrencies. The system implements a price-time priority matching algorithm and maintains separate orderbooks for different securities.
+
+### Supported Assets
+- **Traditional Securities**: Stocks (e.g., AAPL)
+- **Cryptocurrencies**: Bitcoin (BTC), DeCoin (DEC)
+- **Extensible Architecture**: Easy to add new asset types
 
 The current system uses 1-2 CPU cores for order matching and trade settlement, and 1-2 CPU cores for visualization. The number of CPU cores can be adjusted in the configuration file.
 
@@ -388,17 +469,17 @@ The Trade Log Replayer is a tool for streaming historical trade logs to the visu
 
 2. Run the Trade Log Replayer:
 ```bash
-python TradeLogReplayer.py path/to/your/trade_log.csv
+python run_replayer.py path/to/your/trade_log.csv
 ```
 
 3. Optional parameters:
 ```bash
-python TradeLogReplayer.py path/to/your/trade_log.csv --speed 2.0 --port 8085
+python run_replayer.py path/to/your/trade_log.csv --speed 2.0 --port 12085
 ```
    - `--speed` or `-s`: Replay speed multiplier (default: 1.0 = real-time)
-   - `--port` or `-p`: Web server port (default: 8084)
+   - `--port` or `-p`: Web server port (default: 12084)
 
-4. Open your browser to the displayed URL (default: http://localhost:8084/)
+4. Open your browser to the displayed URL (default: http://localhost:12084/)
 
 5. Use the replay controls at the top of the page to:
    - Play/Pause the replay
@@ -410,11 +491,45 @@ python TradeLogReplayer.py path/to/your/trade_log.csv --speed 2.0 --port 8085
 A sample trade log file (`sample_trade_log.csv`) is provided for testing the replayer:
 
 ```bash
-python TradeLogReplayer.py sample_trade_log.csv
+python run_replayer.py sample_trade_log.csv
 ```
 
 ### 9.4 Exporting Trade Logs
 
 Trade logs can be exported from a live trading session by enabling the `EXPORT_TRADES` option in `config.py`. Exported trade logs are saved to the `logs` directory with a timestamp.
+
+## 10. Docker Architecture
+
+The application is fully containerized using Docker and orchestrated with Docker Compose. The architecture includes:
+
+### 10.1 Services
+
+- **market-viz**: Main visualization server (port 12084)
+- **trade-replayer**: Trade log replay service (port 12085) - optional profile
+- **market-simulator**: Market rush simulator - optional profile
+- **crypto-test**: Cryptocurrency trading tests - optional profile
+- **performance-test**: Performance testing suite - optional profile
+
+### 10.2 Volumes
+
+- `./logs`: Application logs
+- `./trades_logs`: Trade execution logs
+
+### 10.3 Network
+
+All services communicate through a dedicated bridge network (`market-network`) for isolation and security.
+
+### 10.4 Health Checks
+
+The main visualization server includes health checks to ensure service availability.
+
+### 10.5 Environment Variables
+
+Key configuration options can be set via environment variables:
+- `HOST`: Server bind address (default: 0.0.0.0)
+- `PORT`: Server port (default: 12084)
+- `DEBUG`: Debug mode (default: False)
+- `SIMULATION_DURATION`: Duration for market simulation
+- `NUM_PARTICIPANTS`: Number of simulated market participants
 
 All Rights Reserved - Unidatum Integrated Products LLC

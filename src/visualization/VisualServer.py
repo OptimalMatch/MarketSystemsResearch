@@ -10,12 +10,12 @@ import signal
 import sys
 from decimal import Decimal
 
-from Exchange import Market
-from MarketMaker import MarketMaker
-from MarketRushSimulator import MarketRushSimulator
-from Visualization import Visualization
-from config import Config
-from logger import setup_logger
+from src.core.Exchange import Market
+from src.market.MarketMaker import MarketMaker
+from src.market.MarketRushSimulator import MarketRushSimulator
+from src.visualization.Visualization import Visualization
+from src.utils.config import Config
+from src.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 

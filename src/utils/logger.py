@@ -2,7 +2,7 @@
 
 import logging
 import sys
-from config import Config
+from .config import Config
 
 def setup_logger(name):
     """Set up and return a logger with the specified name."""

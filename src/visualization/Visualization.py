@@ -11,8 +11,8 @@ import datetime
 import csv
 from pathlib import Path
 
-from config import Config
-from logger import setup_logger
+from src.utils.config import Config
+from src.utils.logger import setup_logger
 
 # Disable noisy socketio logging
 logging.getLogger('socketio').setLevel(logging.ERROR)

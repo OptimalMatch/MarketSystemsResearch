@@ -5,7 +5,7 @@ import threading
 from enum import Enum
 import logging
 import statistics
-from Exchange import Market, OrderSide
+from src.core.Exchange import Market, OrderSide
 
 #logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - MARKETMAKER - %(message)s')
 

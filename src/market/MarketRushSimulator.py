@@ -10,8 +10,8 @@ import queue
 from datetime import datetime
 import signal
 import sys
-from Exchange import Market, OrderSide
-from MarketMaker import MarketMaker
+from src.core.Exchange import Market, OrderSide
+from src.market.MarketMaker import MarketMaker
 import psutil
 import os
 
