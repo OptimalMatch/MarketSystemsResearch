@@ -280,7 +280,7 @@ class IntegratedOMS:
             'ledger': self.ledger.get_stats() if self.ledger else {}
         }
 
-    async def start_data_feed(self, host: str = "0.0.0.0", port: int = 8765):
+    async def start_data_feed(self, host: str = "0.0.0.0", port: int = 13765):
         """Start WebSocket data feed server"""
         self.data_feed = WebSocketDataFeed(host, port)
 

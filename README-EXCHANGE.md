@@ -12,7 +12,7 @@ Ultra-high performance cryptocurrency exchange system featuring:
 
 ### 1. Prerequisites
 - Docker & Docker Compose installed
-- Port 8000 (API), 8765 (WebSocket), 5432 (PostgreSQL), 6379 (Redis) available
+- Port 13000 (API), 13765 (WebSocket), 5432 (PostgreSQL), 6379 (Redis) available
 - DeCoin containers running (optional, for blockchain integration)
 
 ### 2. Build and Start
@@ -32,10 +32,10 @@ make -f Makefile.exchange status
 
 ```bash
 # Check API health
-curl http://localhost:8000/health
+curl http://localhost:13000/health
 
 # Connect to WebSocket (example)
-wscat -c ws://localhost:8765
+wscat -c ws://localhost:13765
 > {"type": "subscribe", "channel": "ticker", "symbol": "DEC/USD"}
 ```
 
@@ -44,7 +44,7 @@ wscat -c ws://localhost:8765
 ```
 ┌─────────────────────────────────────────────────────┐
 │                   API Gateway                        │
-│                  (Port 8000)                         │
+│                  (Port 13000)                        │
 └─────────────────────────────────────────────────────┘
                          │
     ┌────────────────────┼────────────────────┐
@@ -59,7 +59,7 @@ wscat -c ws://localhost:8765
                 ┌──────────────┐
                 │   WebSocket  │
                 │     Feed     │
-                │  (Port 8765) │
+                │  (Port 13765)│
                 └──────────────┘
                          │
     ┌────────────────────┼────────────────────┐
@@ -78,8 +78,8 @@ wscat -c ws://localhost:8765
 | Matching Engine | Internal | Order matching (1.1M orders/sec) |
 | OMS | Internal | Order management |
 | DeCoin Ledger | Internal | Instant DEC settlements |
-| WebSocket Feed | 8765 | Real-time market data |
-| API Gateway | 8000 | REST API endpoint |
+| WebSocket Feed | 13765 | Real-time market data |
+| API Gateway | 13000 | REST API endpoint |
 
 ### Performance Metrics
 
@@ -204,7 +204,7 @@ async def test_order():
         }
 
         async with session.post(
-            "http://localhost:8000/api/v1/orders",
+            "http://localhost:13000/api/v1/orders",
             json=order
         ) as resp:
             result = await resp.json()

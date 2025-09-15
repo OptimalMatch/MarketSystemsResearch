@@ -322,7 +322,7 @@ if __name__ == "__main__":
 
     # Get configuration from environment variables
     host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("PORT", "8000"))
+    port = int(os.getenv("PORT", "13000"))
 
     # Run the FastAPI application
     uvicorn.run("SecuritiesPlatform:app", host=host, port=port, reload=True)

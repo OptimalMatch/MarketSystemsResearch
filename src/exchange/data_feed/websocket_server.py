@@ -68,7 +68,7 @@ class WebSocketDataFeed:
 
     def __init__(self,
                  host: str = "0.0.0.0",
-                 port: int = 8765,
+                 port: int = 13765,
                  use_binary: bool = True):
 
         self.host = host
@@ -483,7 +483,7 @@ class WebSocketDataFeed:
 # Test client for development
 async def test_client():
     """Test WebSocket client"""
-    uri = "ws://localhost:8765"
+    uri = "ws://localhost:13765"
 
     async with websockets.connect(uri) as websocket:
         print("Connected to server")

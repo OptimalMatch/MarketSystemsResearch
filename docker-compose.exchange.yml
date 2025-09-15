@@ -125,12 +125,12 @@ services:
     container_name: exchange-websocket-feed
     command: python -m src.exchange.data_feed.service
     ports:
-      - "8765:8765"
+      - "13765:13765"
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       MATCHING_ENGINE_HOST: matching-engine
-      WEBSOCKET_PORT: 8765
+      WEBSOCKET_PORT: 13765
     depends_on:
       - matching-engine
       - redis
@@ -146,9 +146,9 @@ services:
       context: .
       dockerfile: Dockerfile.exchange
     container_name: exchange-api-gateway
-    command: uvicorn src.exchange.api.gateway:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn src.exchange.api.gateway:app --host 0.0.0.0 --port 13000 --reload
     ports:
-      - "8000:8000"
+      - "13000:13000"
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -159,7 +159,7 @@ services:
       OMS_HOST: oms
       MATCHING_ENGINE_HOST: matching-engine
       DECOIN_LEDGER_HOST: decoin-ledger
-      WEBSOCKET_URL: ws://websocket-feed:8765
+      WEBSOCKET_URL: ws://websocket-feed:13765
     depends_on:
       - oms
       - matching-engine
@@ -181,8 +181,8 @@ services:
     ports:
       - "12084:12084"
     environment:
-      API_URL: http://api-gateway:8000
-      WEBSOCKET_URL: ws://websocket-feed:8765
+      API_URL: http://api-gateway:13000
+      WEBSOCKET_URL: ws://websocket-feed:13765
     depends_on:
       - api-gateway
       - websocket-feed
