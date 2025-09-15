@@ -15,7 +15,7 @@ class DataFeedService:
         # Configuration
         self.host = "0.0.0.0"
         self.port = int(os.getenv('WEBSOCKET_PORT', 13765))
-        self.use_binary = os.getenv('USE_BINARY_PROTOCOL', 'true').lower() == 'true'
+        self.use_binary = os.getenv('USE_BINARY_PROTOCOL', 'false').lower() == 'true'
 
         # Initialize WebSocket server
         self.server = WebSocketDataFeed(

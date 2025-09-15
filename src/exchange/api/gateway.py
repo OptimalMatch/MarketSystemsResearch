@@ -4,6 +4,7 @@ Provides REST and WebSocket endpoints for trading.
 """
 
 from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from typing import Dict, List, Optional
@@ -22,6 +23,21 @@ from .auth import get_current_user, get_current_user_full, check_rate_limit, ini
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Exchange API", version="1.0.0")
+
+# Add CORS middleware to allow browser requests
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:13080",   # Admin interface
+        "http://pop-os-1:13080",    # Admin interface via hostname
+        "http://localhost:3000",    # Development
+        "http://localhost:8080",    # Alternative dev port
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 security = HTTPBearer()
 
 # Initialize systems (would be dependency injected in production)
