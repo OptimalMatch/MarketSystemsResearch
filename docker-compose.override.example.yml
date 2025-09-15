@@ -5,7 +5,7 @@ services:
   market-viz:
     environment:
       # Example 1: Trade only cryptocurrencies
-      - SECURITIES=BTC,DEC
+      - SECURITIES=DEC
 
       # Example 2: Mix of stocks and cryptocurrencies
       # - SECURITIES=AAPL,BTC,DEC
