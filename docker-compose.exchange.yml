@@ -171,6 +171,24 @@ services:
       - exchange-network
     restart: unless-stopped
 
+  # React Admin Interface
+  admin-interface:
+    build:
+      context: .
+      dockerfile: Dockerfile.admin
+    container_name: exchange-admin-interface
+    ports:
+      - "13080:80"
+    environment:
+      REACT_APP_API_BASE_URL: http://localhost:13000
+      REACT_APP_WS_BASE_URL: ws://localhost:13765
+    depends_on:
+      - api-gateway
+      - websocket-feed
+    networks:
+      - exchange-network
+    restart: unless-stopped
+
   # Web Interface (Optional)
   web-interface:
     build:
