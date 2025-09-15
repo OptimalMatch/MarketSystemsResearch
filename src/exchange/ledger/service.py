@@ -8,7 +8,11 @@ import asyncio
 import os
 import signal
 import sys
-from .decoin_ledger import DeCoinLedger, ExchangeSettlementBridge
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from exchange.ledger.decoin_ledger import DeCoinLedger, ExchangeSettlementBridge
 
 class DeCoinLedgerService:
     def __init__(self):

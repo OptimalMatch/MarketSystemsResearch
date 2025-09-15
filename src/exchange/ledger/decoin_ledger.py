@@ -23,12 +23,20 @@ import uuid
 import sys
 import os
 
-# Add DeCoin source to path for integration
-sys.path.insert(0, '/home/unidatum/github/decoin/src')
-
-# Import DeCoin blockchain components
-from blockchain import Transaction as DecoinTransaction, TransactionType, Block
-from transactions import TransactionBuilder
+# Add DeCoin source to path for integration (optional)
+try:
+    sys.path.insert(0, '/home/unidatum/github/decoin/src')
+    # Import DeCoin blockchain components
+    from blockchain import Transaction as DecoinTransaction, TransactionType, Block
+    from transactions import TransactionBuilder
+    DECOIN_AVAILABLE = True
+except ImportError:
+    # DeCoin not available - will run in standalone mode
+    DecoinTransaction = None
+    TransactionType = None
+    Block = None
+    TransactionBuilder = None
+    DECOIN_AVAILABLE = False
 
 class TransferStatus(Enum):
     PENDING = "pending"
