@@ -8,7 +8,7 @@ import asyncio
 import os
 import signal
 import sys
-from ultra_fast_engine import UltraFastMatchingEngine, BatchOptimizedEngine
+from .ultra_fast_engine import UltraFastMatchingEngine, BatchOptimizedEngine
 
 class MatchingEngineService:
     def __init__(self):

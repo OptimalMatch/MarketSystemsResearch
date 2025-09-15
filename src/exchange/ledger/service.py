@@ -8,7 +8,7 @@ import asyncio
 import os
 import signal
 import sys
-from decoin_ledger import DeCoinLedger, ExchangeSettlementBridge
+from .decoin_ledger import DeCoinLedger, ExchangeSettlementBridge
 
 class DeCoinLedgerService:
     def __init__(self):

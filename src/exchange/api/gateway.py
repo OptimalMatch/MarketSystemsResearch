@@ -30,11 +30,11 @@ risk_engine = RiskEngine()
 # Pydantic models for API
 class OrderRequest(BaseModel):
     symbol: str
-    side: str = Field(..., regex="^(buy|sell)$")
-    order_type: str = Field(..., regex="^(market|limit|stop|stop_limit)$")
+    side: str = Field(..., pattern="^(buy|sell)$")
+    order_type: str = Field(..., pattern="^(market|limit|stop|stop_limit)$")
     quantity: str
     price: Optional[str] = None
-    time_in_force: str = Field(default="GTC", regex="^(GTC|IOC|FOK|DAY)$")
+    time_in_force: str = Field(default="GTC", pattern="^(GTC|IOC|FOK|DAY)$")
     stop_price: Optional[str] = None
     client_order_id: Optional[str] = None
     post_only: bool = False

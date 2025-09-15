@@ -8,7 +8,7 @@ import asyncio
 import os
 import signal
 import sys
-from websocket_server import WebSocketDataFeed
+from .websocket_server import WebSocketDataFeed
 
 class DataFeedService:
     def __init__(self):
