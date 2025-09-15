@@ -94,6 +94,9 @@ class IntegratedOMS:
         # WebSocket data feed
         self.data_feed = None  # Will be initialized separately
 
+        # Database manager
+        self.db_manager = None  # Will be initialized with async init
+
         # Order tracking
         self.orders: Dict[int, dict] = {}
         self.user_orders: Dict[str, List[int]] = {}
@@ -102,6 +105,12 @@ class IntegratedOMS:
         self.total_orders = 0
         self.total_trades = 0
         self.total_volume = Decimal('0')
+
+    async def initialize_database(self):
+        """Initialize database connection"""
+        if not self.db_manager:
+            from ..database.db_manager import get_db_manager
+            self.db_manager = await get_db_manager()
 
     async def submit_order(self,
                           user_id: str,
@@ -189,6 +198,22 @@ class IntegratedOMS:
                 self.user_orders[user_id] = []
             self.user_orders[user_id].append(order_id)
 
+            # Persist to database if available
+            if self.db_manager:
+                try:
+                    db_order_id = await self.db_manager.insert_order({
+                        'user_id': user_id,
+                        'symbol': symbol,
+                        'side': side,
+                        'order_type': order_type,
+                        'quantity': quantity,
+                        'price': price,
+                        'time_in_force': time_in_force
+                    })
+                    order_info['db_order_id'] = db_order_id
+                except Exception as e:
+                    print(f"Failed to persist order to database: {e}")
+
             # Update statistics
             self.total_orders += 1
 
@@ -212,6 +237,33 @@ class IntegratedOMS:
             # Update statistics
             self.total_trades += 1
             self.total_volume += Decimal(str(trade['quantity']))
+
+            # Persist trade to database if available
+            if self.db_manager:
+                try:
+                    trade_id = await self.db_manager.insert_trade({
+                        'symbol': order_info['symbol'],
+                        'buyer_order_id': order_info.get('db_order_id'),
+                        'seller_order_id': None,  # Would need matching order info
+                        'buyer_user_id': order_info['user_id'] if order_info['side'] == 'buy' else None,
+                        'seller_user_id': order_info['user_id'] if order_info['side'] == 'sell' else None,
+                        'price': trade['price'],
+                        'quantity': trade['quantity'],
+                        'maker_side': trade.get('maker_side', 'buy')
+                    })
+                    trade['db_trade_id'] = trade_id
+
+                    # Update order status in database
+                    if order_info.get('db_order_id'):
+                        status = 'filled' if order_info['filled_quantity'] >= order_info['quantity'] else 'partially_filled'
+                        await self.db_manager.update_order_status(
+                            order_info['db_order_id'],
+                            status,
+                            order_info['filled_quantity'],
+                            Decimal(str(trade['price']))
+                        )
+                except Exception as e:
+                    print(f"Failed to persist trade to database: {e}")
 
             # Settlement for DEC pairs
             if order_info['symbol'].startswith("DEC/"):
