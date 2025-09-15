@@ -1,0 +1,115 @@
+# Makefile for Exchange System
+
+.PHONY: help build up down restart logs clean test status
+
+# Default target
+help:
+	@echo "Exchange System Management Commands:"
+	@echo ""
+	@echo "  make build      - Build all Docker images"
+	@echo "  make up         - Start all services"
+	@echo "  make down       - Stop all services"
+	@echo "  make restart    - Restart all services"
+	@echo "  make logs       - View logs from all services"
+	@echo "  make clean      - Clean up containers and volumes"
+	@echo "  make test       - Run integration tests"
+	@echo "  make status     - Show service status"
+	@echo ""
+	@echo "Individual service commands:"
+	@echo "  make logs-oms   - View OMS logs"
+	@echo "  make logs-ws    - View WebSocket logs"
+	@echo "  make shell-db   - Connect to PostgreSQL"
+	@echo "  make shell-redis- Connect to Redis CLI"
+
+# Build Docker images
+build:
+	docker-compose -f docker-compose.exchange.yml build
+
+# Start all services
+up:
+	docker-compose -f docker-compose.exchange.yml up -d
+	@echo "Waiting for services to be ready..."
+	@sleep 5
+	@make status
+
+# Stop all services
+down:
+	docker-compose -f docker-compose.exchange.yml down
+
+# Restart all services
+restart:
+	@make down
+	@make up
+
+# View logs from all services
+logs:
+	docker-compose -f docker-compose.exchange.yml logs -f
+
+# Clean up everything
+clean:
+	docker-compose -f docker-compose.exchange.yml down -v
+	docker system prune -f
+
+# Run tests
+test:
+	@echo "Running integration tests..."
+	docker-compose -f docker-compose.exchange.yml exec api-gateway python -m pytest tests/
+
+# Show service status
+status:
+	@echo "Exchange Service Status:"
+	@echo "========================"
+	@docker-compose -f docker-compose.exchange.yml ps
+	@echo ""
+	@echo "Service Health:"
+	@echo "---------------"
+	@docker ps --filter "name=exchange-" --format "table {{.Names}}\t{{.Status}}"
+
+# Individual service logs
+logs-matching:
+	docker-compose -f docker-compose.exchange.yml logs -f matching-engine
+
+logs-oms:
+	docker-compose -f docker-compose.exchange.yml logs -f oms
+
+logs-ledger:
+	docker-compose -f docker-compose.exchange.yml logs -f decoin-ledger
+
+logs-ws:
+	docker-compose -f docker-compose.exchange.yml logs -f websocket-feed
+
+logs-api:
+	docker-compose -f docker-compose.exchange.yml logs -f api-gateway
+
+# Database access
+shell-db:
+	docker-compose -f docker-compose.exchange.yml exec postgres psql -U exchange_user -d exchange_db
+
+# Redis access
+shell-redis:
+	docker-compose -f docker-compose.exchange.yml exec redis redis-cli
+
+# Performance monitoring
+monitor:
+	@echo "Performance Monitoring Dashboard"
+	@echo "================================"
+	@while true; do \
+		clear; \
+		echo "Exchange Performance Monitor - $$(date)"; \
+		echo ""; \
+		echo "Container Stats:"; \
+		docker stats --no-stream --format "table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}" $$(docker ps -q --filter "name=exchange-"); \
+		echo ""; \
+		echo "Redis Info:"; \
+		docker-compose -f docker-compose.exchange.yml exec -T redis redis-cli INFO stats | grep -E "instantaneous_ops_per_sec|used_memory_human"; \
+		sleep 5; \
+	done
+
+# Development mode - with hot reload
+dev:
+	docker-compose -f docker-compose.exchange.yml up
+
+# Production mode - detached with restart policy
+prod:
+	docker-compose -f docker-compose.exchange.yml up -d
+	docker-compose -f docker-compose.exchange.yml ps

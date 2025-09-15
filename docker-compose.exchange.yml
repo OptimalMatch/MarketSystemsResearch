@@ -1,0 +1,203 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: exchange-postgres
+    environment:
+      POSTGRES_DB: exchange_db
+      POSTGRES_USER: exchange_user
+      POSTGRES_PASSWORD: exchange_pass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U exchange_user"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - exchange-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: exchange-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - exchange-network
+
+  # Matching Engine Service
+  matching-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile.exchange
+    container_name: exchange-matching-engine
+    command: python -m src.exchange.matching_engine.service
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: exchange_db
+      POSTGRES_USER: exchange_user
+      POSTGRES_PASSWORD: exchange_pass
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./src:/app/src
+    networks:
+      - exchange-network
+    restart: unless-stopped
+
+  # Order Management System
+  oms:
+    build:
+      context: .
+      dockerfile: Dockerfile.exchange
+    container_name: exchange-oms
+    command: python -m src.exchange.order_management.service
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: exchange_db
+      POSTGRES_USER: exchange_user
+      POSTGRES_PASSWORD: exchange_pass
+      MATCHING_ENGINE_HOST: matching-engine
+    depends_on:
+      - matching-engine
+      - postgres
+      - redis
+    volumes:
+      - ./src:/app/src
+    networks:
+      - exchange-network
+    restart: unless-stopped
+
+  # DeCoin Ledger Service
+  decoin-ledger:
+    build:
+      context: .
+      dockerfile: Dockerfile.exchange
+    container_name: exchange-decoin-ledger
+    command: python -m src.exchange.ledger.service
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: exchange_db
+      POSTGRES_USER: exchange_user
+      POSTGRES_PASSWORD: exchange_pass
+      DECOIN_NODE_URL: http://host.docker.internal:11080
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./src:/app/src
+    networks:
+      - exchange-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # Access host's DeCoin containers
+    restart: unless-stopped
+
+  # WebSocket Data Feed
+  websocket-feed:
+    build:
+      context: .
+      dockerfile: Dockerfile.exchange
+    container_name: exchange-websocket-feed
+    command: python -m src.exchange.data_feed.service
+    ports:
+      - "8765:8765"
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MATCHING_ENGINE_HOST: matching-engine
+      WEBSOCKET_PORT: 8765
+    depends_on:
+      - matching-engine
+      - redis
+    volumes:
+      - ./src:/app/src
+    networks:
+      - exchange-network
+    restart: unless-stopped
+
+  # API Gateway
+  api-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.exchange
+    container_name: exchange-api-gateway
+    command: uvicorn src.exchange.api.gateway:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: exchange_db
+      POSTGRES_USER: exchange_user
+      POSTGRES_PASSWORD: exchange_pass
+      OMS_HOST: oms
+      MATCHING_ENGINE_HOST: matching-engine
+      DECOIN_LEDGER_HOST: decoin-ledger
+      WEBSOCKET_URL: ws://websocket-feed:8765
+    depends_on:
+      - oms
+      - matching-engine
+      - decoin-ledger
+      - websocket-feed
+    volumes:
+      - ./src:/app/src
+    networks:
+      - exchange-network
+    restart: unless-stopped
+
+  # Web Interface (Optional)
+  web-interface:
+    build:
+      context: .
+      dockerfile: Dockerfile.exchange
+    container_name: exchange-web
+    command: python -m src.visualization.VisualServer
+    ports:
+      - "12084:12084"
+    environment:
+      API_URL: http://api-gateway:8000
+      WEBSOCKET_URL: ws://websocket-feed:8765
+    depends_on:
+      - api-gateway
+      - websocket-feed
+    volumes:
+      - ./src:/app/src
+      - ./templates:/app/templates
+    networks:
+      - exchange-network
+    restart: unless-stopped
+
+networks:
+  exchange-network:
+    driver: bridge
+    name: exchange-network
+
+volumes:
+  postgres_data:
+  redis_data:

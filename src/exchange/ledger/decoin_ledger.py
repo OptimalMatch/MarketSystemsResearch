@@ -8,7 +8,11 @@ import time
 import json
 import hashlib
 import redis
-import psycopg2
+
+try:
+    import psycopg2
+except ImportError:
+    psycopg2 = None  # Make PostgreSQL optional
 from decimal import Decimal
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
@@ -78,7 +82,7 @@ class DeCoinLedger:
         )
 
         # PostgreSQL for persistent transaction log
-        if postgres_config:
+        if postgres_config and psycopg2:
             self.postgres_conn = psycopg2.connect(**postgres_config)
             self.init_database()
         else:
