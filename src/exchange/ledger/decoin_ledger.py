@@ -74,12 +74,19 @@ class DeCoinLedger:
                  anchor_interval: int = 3600):  # Anchor every hour
 
         # Initialize Redis for ultra-fast balance queries
-        self.redis_client = redis.Redis(
-            host=redis_host,
-            port=redis_port,
-            decode_responses=True,
-            connection_pool=redis.ConnectionPool(max_connections=100)
-        )
+        try:
+            self.redis_client = redis.Redis(
+                host=redis_host,
+                port=redis_port,
+                decode_responses=True,
+                connection_pool=redis.ConnectionPool(max_connections=100)
+            )
+            # Test connection
+            self.redis_client.ping()
+        except:
+            # Fallback to in-memory only if Redis not available
+            self.redis_client = None
+            print("Warning: Redis not available, using in-memory cache only")
 
         # PostgreSQL for persistent transaction log
         if postgres_config and psycopg2:
@@ -259,9 +266,10 @@ class DeCoinLedger:
     async def get_balance(self, address: str) -> Decimal:
         """Get balance from cache with fallback to database"""
         # Try Redis first
-        balance_str = self.redis_client.get(f"balance:{address}")
-        if balance_str:
-            return Decimal(balance_str)
+        if self.redis_client:
+            balance_str = self.redis_client.get(f"balance:{address}")
+            if balance_str:
+                return Decimal(str(balance_str))
 
         # Fallback to memory cache
         if address in self.balance_cache:
@@ -288,8 +296,9 @@ class DeCoinLedger:
 
     async def set_balance(self, address: str, balance: Decimal):
         """Update balance in all caches"""
-        # Update Redis
-        self.redis_client.set(f"balance:{address}", str(balance), ex=3600)  # 1 hour TTL
+        # Update Redis if available
+        if self.redis_client:
+            self.redis_client.set(f"balance:{address}", str(balance), ex=3600)  # 1 hour TTL
 
         # Update memory cache
         self.balance_cache[address] = balance
