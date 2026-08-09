@@ -169,12 +169,14 @@ class OrderBook:
         else:
             book = self.bids
 
+        skipped = []
         while book and order.remaining_quantity > 0:
             counter_order = heapq.heappop(book)
 
-            # Skip self-trade
+            # Skip self-trade: hold aside, do not push-and-re-pop (the loop
+            # would otherwise spin forever on the taker's own resting order).
             if counter_order.user_id == order.user_id:
-                heapq.heappush(book, counter_order)
+                skipped.append(counter_order)
                 continue
 
             trade = self._execute_trade(order, counter_order)
@@ -184,6 +186,8 @@ class OrderBook:
             # Put back partially filled order
             if counter_order.remaining_quantity > 0:
                 heapq.heappush(book, counter_order)
+        for o in skipped:
+            heapq.heappush(book, o)
 
         # Update order status
         if order.remaining_quantity == 0:
@@ -199,14 +203,15 @@ class OrderBook:
 
         if order.side == 'buy':
             book = self.asks
+            skipped = []
             while book and order.remaining_quantity > 0:
                 if book[0].price > order.price:
                     break
                 counter_order = heapq.heappop(book)
 
-                # Skip self-trade
+                # Skip self-trade: hold aside, do not push-and-re-pop.
                 if counter_order.user_id == order.user_id:
-                    heapq.heappush(book, counter_order)
+                    skipped.append(counter_order)
                     continue
 
                 trade = self._execute_trade(order, counter_order)
@@ -215,17 +220,24 @@ class OrderBook:
 
                 if counter_order.remaining_quantity > 0:
                     heapq.heappush(book, counter_order)
+            for o in skipped:
+                heapq.heappush(book, o)
         else:
             book = self.bids
+            skipped = []
             while book and order.remaining_quantity > 0:
-                # Note: bids use negative prices in heap
-                if -book[0].price < order.price:
+                # Bids are stored with their true (positive) price; Order.__lt__
+                # already sorts the highest bid to book[0]. If the best bid is
+                # below our ask, there is no cross — stop.
+                if book[0].price < order.price:
                     break
                 counter_order = heapq.heappop(book)
 
-                # Skip self-trade
+                # Skip self-trade: hold it aside and keep matching past it,
+                # rather than pushing it back and re-popping the same order
+                # forever (the infinite loop the original shipped).
                 if counter_order.user_id == order.user_id:
-                    heapq.heappush(book, counter_order)
+                    skipped.append(counter_order)
                     continue
 
                 trade = self._execute_trade(order, counter_order)
@@ -234,14 +246,14 @@ class OrderBook:
 
                 if counter_order.remaining_quantity > 0:
                     heapq.heappush(book, counter_order)
+            for o in skipped:
+                heapq.heappush(book, o)
 
-        # Add remaining order to book
+        # Add remaining order to book. No sign juggling: __lt__ handles
+        # side-aware price priority on the stored positive price.
         if order.remaining_quantity > 0:
             if order.side == 'buy':
-                # Use negative price for buy orders (max heap)
-                order.price = -order.price
                 heapq.heappush(self.bids, order)
-                order.price = -order.price  # Restore original
             else:
                 heapq.heappush(self.asks, order)
         else:
@@ -257,15 +269,13 @@ class OrderBook:
                 order.status = OrderStatus.REJECTED
                 return []
         else:
-            if self.bids and order.price <= -self.bids[0].price:
+            if self.bids and order.price <= self.bids[0].price:
                 order.status = OrderStatus.REJECTED
                 return []
 
-        # Add as limit order
+        # Add as limit order (bids stored with true positive price; __lt__ orders them)
         if order.side == 'buy':
-            order.price = -order.price
             heapq.heappush(self.bids, order)
-            order.price = -order.price
         else:
             heapq.heappush(self.asks, order)
 
