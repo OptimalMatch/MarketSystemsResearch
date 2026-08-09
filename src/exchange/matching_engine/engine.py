@@ -105,7 +105,14 @@ class Trade:
 class OrderBook:
     """Optimized order book for a single trading pair."""
 
-    def __init__(self, symbol: str):
+    # Trading fees, as a fraction of notional. From the DeCoin spec's
+    # FEE_SCHEDULE: maker 0.1%, taker 0.2%. The taker (the incoming, aggressive
+    # order) pays more; the maker (the resting order that provided liquidity)
+    # pays less — the standard incentive to post rather than take.
+    MAKER_FEE_RATE = Decimal('0.001')
+    TAKER_FEE_RATE = Decimal('0.002')
+
+    def __init__(self, symbol: str, maker_fee_rate: Decimal = None, taker_fee_rate: Decimal = None):
         self.symbol = symbol
         self.bids: List[Order] = []  # Max heap (use negative prices)
         self.asks: List[Order] = []  # Min heap
@@ -116,6 +123,8 @@ class OrderBook:
         self.last_trade_time: Optional[datetime] = None
         self.daily_volume: Decimal = Decimal('0')
         self.daily_trades: int = 0
+        self.maker_fee_rate = maker_fee_rate if maker_fee_rate is not None else self.MAKER_FEE_RATE
+        self.taker_fee_rate = taker_fee_rate if taker_fee_rate is not None else self.TAKER_FEE_RATE
 
     def add_order(self, order: Order) -> List[Trade]:
         """Add order and execute matches."""
@@ -291,18 +300,27 @@ class OrderBook:
         # Use maker price
         trade_price = abs(maker_order.price) if maker_order.price else self.last_trade_price
 
+        # Fees on notional: taker pays the taker rate, maker the maker rate.
+        # buyer_fee/seller_fee are set by whether the buyer was taker or maker.
+        notional = trade_price * trade_quantity
+        taker_fee = notional * self.taker_fee_rate
+        maker_fee = notional * self.maker_fee_rate
+        buyer_is_taker = taker_order.side == 'buy'
+
         # Create trade
         trade = Trade(
             id=str(uuid.uuid4()),
             symbol=self.symbol,
-            buyer_order_id=taker_order.id if taker_order.side == 'buy' else maker_order.id,
-            seller_order_id=maker_order.id if taker_order.side == 'buy' else taker_order.id,
-            buyer_user_id=taker_order.user_id if taker_order.side == 'buy' else maker_order.user_id,
-            seller_user_id=maker_order.user_id if taker_order.side == 'buy' else taker_order.user_id,
+            buyer_order_id=taker_order.id if buyer_is_taker else maker_order.id,
+            seller_order_id=maker_order.id if buyer_is_taker else taker_order.id,
+            buyer_user_id=taker_order.user_id if buyer_is_taker else maker_order.user_id,
+            seller_user_id=maker_order.user_id if buyer_is_taker else taker_order.user_id,
             price=trade_price,
             quantity=trade_quantity,
             maker_order_id=maker_order.id,
-            taker_order_id=taker_order.id
+            taker_order_id=taker_order.id,
+            buyer_fee=taker_fee if buyer_is_taker else maker_fee,
+            seller_fee=maker_fee if buyer_is_taker else taker_fee,
         )
 
         # Update orders

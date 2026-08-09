@@ -4,6 +4,7 @@ Provides API key validation and JWT token generation
 """
 
 import os
+import logging
 try:
     import jwt
 except ImportError:
@@ -19,7 +20,23 @@ import asyncpg
 from passlib.context import CryptContext
 
 # Configuration
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "exchange-secret-key-change-in-production")
+#
+# JWT_SECRET_KEY must be set in any real deployment. A committed default is a
+# vulnerability: anyone with the source can forge tokens signed with it. So we
+# never ship a usable constant. If the env var is missing we generate a random
+# per-process key (fine for local dev — tokens simply don't survive a restart)
+# and, when ENV=production, refuse to start rather than run on a throwaway key.
+SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+if not SECRET_KEY:
+    if os.getenv("ENV", "development").lower() == "production":
+        raise RuntimeError(
+            "JWT_SECRET_KEY must be set in production. Refusing to start with an "
+            "ephemeral key that would invalidate all tokens on restart."
+        )
+    logging.getLogger(__name__).warning(
+        "JWT_SECRET_KEY not set; using an ephemeral per-process key (dev only)."
+    )
+    SECRET_KEY = secrets.token_urlsafe(64)
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 

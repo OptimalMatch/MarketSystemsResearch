@@ -123,6 +123,7 @@ class UltraFastMatchingEngine:
                         'timestamp': time.perf_counter()
                     }
                     trades.append(trade)
+                    self.trade_buffer.append(trade)
 
                     self.trade_id_counter += 1
                     self.total_trades += 1
@@ -163,6 +164,7 @@ class UltraFastMatchingEngine:
                         'timestamp': time.perf_counter()
                     }
                     trades.append(trade)
+                    self.trade_buffer.append(trade)
 
                     self.trade_id_counter += 1
                     self.total_trades += 1
@@ -249,6 +251,12 @@ class UltraFastMatchingEngine:
             'ask_depth': sum(1 for _, _, o in self.sell_orders if o.quantity > 0),
             'last_price': self.last_trade_price
         }
+
+    def get_recent_trades(self, limit: int = 100) -> List[dict]:
+        """Return the most recent trades, newest first. Real trades from the
+        match loop (trade_buffer), not fabricated — the API's trades endpoint
+        reads this instead of inventing prints with random.uniform."""
+        return list(self.trade_buffer)[-limit:][::-1]
 
 
 class BatchOptimizedEngine(UltraFastMatchingEngine):

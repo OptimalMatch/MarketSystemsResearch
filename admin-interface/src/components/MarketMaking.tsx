@@ -98,32 +98,14 @@ const MarketMaking: React.FC<MarketMakingProps> = ({ selectedSymbol }) => {
       const strategiesData = await apiClient.getMarketMakers();
       setStrategies(strategiesData);
     } catch (err) {
-      // Fallback for demo - create mock data
-      setStrategies([
-        {
-          id: 'grid_mm_1',
-          strategy: 'grid',
-          symbol: 'DEC/USD',
-          active: true,
-          spread_bps: 20,
-          order_amount: 10,
-          max_orders_per_side: 5,
-          inventory_target: 1000,
-          config: { grid_spacing: 0.1 }
-        },
-        {
-          id: 'spread_mm_1',
-          strategy: 'spread',
-          symbol: 'BTC/USD',
-          active: false,
-          spread_bps: 10,
-          order_amount: 0.001,
-          max_orders_per_side: 3,
-          inventory_target: 0.1,
-          config: {}
-        }
-      ]);
-      console.warn('Using mock market maker data - API endpoint not available');
+      // No market-maker management API exists on the gateway yet, so there is
+      // nothing real to show. Report that honestly (empty list + a notice)
+      // rather than rendering fabricated strategies as if they were live.
+      setStrategies([]);
+      setError('No market-maker management API is available yet — strategies '
+        + 'exist as libraries in the engine but are not exposed over the API. '
+        + 'This page has nothing live to manage.');
+      console.warn('market-maker API endpoint not available; showing none');
     } finally {
       setLoading(false);
     }

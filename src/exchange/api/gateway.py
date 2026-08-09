@@ -13,6 +13,7 @@ from datetime import datetime
 import asyncio
 import json
 import logging
+import os
 
 from ..matching_engine.engine import OrderType, TimeInForce, OrderStatus
 from ..matching_engine.ultra_fast_engine import UltraFastMatchingEngine
@@ -24,15 +25,14 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Exchange API", version="1.0.0")
 
-# Add CORS middleware to allow browser requests
+# Add CORS middleware to allow browser requests. Origins come from
+# CORS_ALLOW_ORIGINS (comma-separated) so deployments set their own; the default
+# covers local development only. Don't commit machine-specific hostnames here.
+_default_origins = "http://localhost:13080,http://localhost:3000,http://localhost:8080"
+_cors_origins = [o.strip() for o in os.getenv("CORS_ALLOW_ORIGINS", _default_origins).split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:13080",   # Admin interface
-        "http://pop-os-1:13080",    # Admin interface via hostname
-        "http://localhost:3000",    # Development
-        "http://localhost:8080",    # Alternative dev port
-    ],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -422,27 +422,22 @@ async def get_recent_trades(
     if symbol not in engines:
         raise HTTPException(status_code=404, detail=f"Symbol {symbol} not found")
 
-    # For now, return mock trades (in production, query from database)
-    trades = []
+    # Real recent trades from the engine's trade buffer — no fabrication.
     engine = engines[symbol]
-    stats = engine.get_stats()
-
-    # Generate some mock trades based on current orderbook
-    orderbook = engine.get_order_book_snapshot(5)
-    if orderbook.get("bids") and orderbook.get("asks"):
-        mid_price = (orderbook["bids"][0][0] + orderbook["asks"][0][0]) / 2
-
-        import random
-        for i in range(min(limit, 10)):
-            trades.append({
-                "id": f"trade_{i}",
-                "price": mid_price + random.uniform(-0.5, 0.5),
-                "quantity": random.uniform(0.1, 10.0),
-                "side": "buy" if random.random() > 0.5 else "sell",
-                "timestamp": (datetime.utcnow() - timedelta(seconds=i*10)).isoformat()
-            })
-
-    return trades
+    return [
+        {
+            "id": t["id"],
+            "price": t["price"],
+            "quantity": t["quantity"],
+            "buyer_id": t["buyer_id"],
+            "seller_id": t["seller_id"],
+            # perf_counter timestamps are monotonic seconds, not wall-clock;
+            # surfaced as-is so a client can order/interval them without our
+            # inventing a wall-clock time the engine never recorded.
+            "timestamp": t["timestamp"],
+        }
+        for t in engine.get_recent_trades(limit)
+    ]
 
 
 @app.get("/api/v1/market/ticker/{symbol}")
@@ -468,11 +463,16 @@ async def get_ticker(symbol: str):
         "bid": bid,
         "ask": ask,
         "last": last,
-        "volume_24h": stats.get("total_volume", 0),
-        "trades_24h": stats.get("total_trades", 0),
-        "high_24h": last * 1.05,  # Mock data
-        "low_24h": last * 0.95,   # Mock data
-        "change_24h": 2.5,         # Mock data
+        # volume/trades are real session totals from the engine (not a rolling
+        # 24h window — the in-memory engine keeps no time-bucketed history).
+        "volume": stats.get("total_volume", 0),
+        "trades": stats.get("total_trades", 0),
+        # 24h high/low/change need historical data this in-memory engine does
+        # not retain. Return null rather than fabricate: the old code invented
+        # last*1.05 / last*0.95 / a hardcoded 2.5% and shipped it as real.
+        "high_24h": None,
+        "low_24h": None,
+        "change_24h": None,
         "timestamp": datetime.utcnow().isoformat()
     }
 

@@ -23,9 +23,14 @@ import uuid
 import sys
 import os
 
-# Add DeCoin source to path for integration (optional)
+# Add DeCoin source to path for integration (optional). Point DECOIN_SRC at the
+# DeCoin checkout's src/ directory to enable blockchain anchoring; without it the
+# ledger runs standalone. No path is hardcoded — a machine-specific absolute path
+# only works on the author's box.
 try:
-    sys.path.insert(0, '/home/unidatum/github/decoin/src')
+    _decoin_src = os.getenv("DECOIN_SRC")
+    if _decoin_src:
+        sys.path.insert(0, _decoin_src)
     # Import DeCoin blockchain components
     from blockchain import Transaction as DecoinTransaction, TransactionType, Block
     from transactions import TransactionBuilder
