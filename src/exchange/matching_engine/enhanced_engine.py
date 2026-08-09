@@ -51,6 +51,13 @@ class EnhancedMatchingEngine:
         self.trades = []
         self.last_price = None
         self.current_price = None
+        # Re-entrancy guard for the stop-cascade. _place_limit_order calls
+        # _check_triggered_orders, which places triggered orders, which match
+        # and call _check_triggered_orders again — unbounded mutual recursion
+        # when a triggered stop triggers the next. The guard flattens it: an
+        # inner trigger records the price and the outer loop drains it.
+        self._checking_triggers = False
+        self._pending_trigger_price = None
 
         # Advanced order managers
         self.advanced_orders = AdvancedOrderManager()
@@ -292,9 +299,11 @@ class EnhancedMatchingEngine:
         )
 
         if next_slice:
-            # Place the next slice
+            # Place the next slice. The slice dict carries both "symbol" and
+            # "side"; the original passed symbol as the side, so every iceberg
+            # refill was placed on a side named e.g. "BTC/USD".
             self.place_order(
-                side=next_slice["symbol"],
+                side=next_slice["side"],
                 price=float(next_slice["price"]),
                 quantity=float(next_slice["quantity"]),
                 user_id=0,  # Would need to track this properly
@@ -304,7 +313,30 @@ class EnhancedMatchingEngine:
             )
 
     def _check_triggered_orders(self, current_price: float):
-        """Check and execute triggered advanced orders"""
+        """Check and execute triggered advanced orders.
+
+        Drains cascading triggers iteratively instead of recursively. A
+        trigger fired while we are already draining records the latest price
+        and returns; the loop below picks it up. This bounds a stop-cascade to
+        a loop rather than an unbounded call stack.
+        """
+        if self._checking_triggers:
+            self._pending_trigger_price = current_price
+            return
+        self._checking_triggers = True
+        try:
+            price = current_price
+            passes = 0
+            while price is not None and passes < 1000:
+                self._pending_trigger_price = None
+                self._run_trigger_pass(price)
+                price = self._pending_trigger_price
+                passes += 1
+        finally:
+            self._checking_triggers = False
+
+    def _run_trigger_pass(self, current_price: float):
+        """One pass of trigger checks (helper for _check_triggered_orders)."""
         triggered = self.advanced_orders.update_price(self.symbol, Decimal(current_price))
 
         for trigger_info in triggered:
