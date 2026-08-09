@@ -459,3 +459,50 @@ class MatchingEngine:
     def register_trade_callback(self, callback):
         """Register callback for trade events."""
         self.trade_callbacks.append(callback)
+
+    def get_recent_trades(self, symbol: str, limit: int = 100) -> List[Dict]:
+        """Most-recent trades for a symbol, newest first, from the trade log.
+
+        Fees are included because the engine now computes them; a client that
+        wants to show what a fill cost does not have to re-derive them.
+        """
+        result = []
+        for trade in reversed(self.trades):
+            if trade.symbol != symbol:
+                continue
+            result.append({
+                "id": trade.id,
+                "price": str(trade.price),
+                "quantity": str(trade.quantity),
+                "buyer_user_id": trade.buyer_user_id,
+                "seller_user_id": trade.seller_user_id,
+                "buyer_fee": str(trade.buyer_fee),
+                "seller_fee": str(trade.seller_fee),
+                "fee_currency": trade.fee_currency,
+                "timestamp": trade.timestamp.isoformat(),
+            })
+            if len(result) >= limit:
+                break
+        return result
+
+    def get_stats(self, symbol: str) -> Dict:
+        """Session totals for a symbol, computed from the trade log.
+
+        These are cumulative since the process started, not a rolling 24h
+        window — this in-memory engine keeps no time-bucketed history, so we
+        report what we actually have rather than inventing a window.
+        """
+        volume = Decimal('0')
+        trade_count = 0
+        last_price = None
+        for trade in self.trades:
+            if trade.symbol != symbol:
+                continue
+            volume += trade.price * trade.quantity
+            trade_count += 1
+            last_price = trade.price
+        return {
+            "volume": str(volume),
+            "trades": trade_count,
+            "last_price": str(last_price) if last_price is not None else None,
+        }

@@ -212,14 +212,17 @@ GRANT ALL PRIVILEGES ON SCHEMA exchange TO exchange_user;
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA exchange TO exchange_user;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA exchange TO exchange_user;
 
--- Create indexes for performance
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_orders_active
+-- Create indexes for performance.
+-- Not CONCURRENTLY: this runs at init on empty tables, and CONCURRENTLY cannot
+-- run inside the entrypoint's transaction. The idx_trades_recent predicate also
+-- can't be time-based — CURRENT_TIMESTAMP is not IMMUTABLE, so a partial index
+-- WHERE created_at > now() - interval is rejected. Index the column plainly.
+CREATE INDEX IF NOT EXISTS idx_orders_active
     ON orders(symbol, status)
     WHERE status IN ('new', 'partially_filled');
 
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_trades_recent
-    ON trades(created_at DESC)
-    WHERE created_at > CURRENT_TIMESTAMP - INTERVAL '1 day';
+CREATE INDEX IF NOT EXISTS idx_trades_recent
+    ON trades(created_at DESC);
 
 -- Add comments for documentation
 COMMENT ON TABLE users IS 'Exchange user accounts';

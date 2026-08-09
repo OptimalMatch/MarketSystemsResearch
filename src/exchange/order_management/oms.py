@@ -18,6 +18,31 @@ from ..matching_engine.engine import Order, OrderType, OrderStatus, TimeInForce,
 logger = logging.getLogger(__name__)
 
 
+def _coerce_enum(enum_cls, raw):
+    """Return the enum member for `raw`, given either its value or its name.
+
+    The public API uses codes like 'limit' and 'GTC'. For OrderType, 'limit' is
+    the enum VALUE; for TimeInForce, 'GTC' is the enum NAME (its value is
+    'good_till_cancel'). Rather than make callers know which is which, accept
+    both — by value, then by exact name, then by case-insensitive name.
+    """
+    if isinstance(raw, enum_cls):
+        return raw
+    try:
+        return enum_cls(raw)
+    except ValueError:
+        pass
+    try:
+        return enum_cls[raw]
+    except KeyError:
+        pass
+    upper = str(raw).upper()
+    for member in enum_cls:
+        if member.name == upper:
+            return member
+    raise ValueError(f"{raw!r} is not a valid {enum_cls.__name__}")
+
+
 class OrderValidationError(Exception):
     """Order validation failed."""
     pass
@@ -314,10 +339,10 @@ class OrderManagementSystem:
             user_id=request["user_id"],
             symbol=request["symbol"],
             side=request["side"],
-            order_type=OrderType(request["order_type"]),
+            order_type=_coerce_enum(OrderType, request["order_type"]),
             price=Decimal(str(request.get("price", 0))) if request.get("price") else None,
             quantity=Decimal(str(request["quantity"])),
-            time_in_force=TimeInForce(request.get("time_in_force", "GTC")),
+            time_in_force=_coerce_enum(TimeInForce, request.get("time_in_force", "GTC")),
             stop_price=Decimal(str(request.get("stop_price", 0))) if request.get("stop_price") else None,
             client_order_id=request.get("client_order_id"),
             post_only=request.get("post_only", False),

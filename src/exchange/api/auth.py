@@ -26,9 +26,21 @@ from passlib.context import CryptContext
 # never ship a usable constant. If the env var is missing we generate a random
 # per-process key (fine for local dev — tokens simply don't survive a restart)
 # and, when ENV=production, refuse to start rather than run on a throwaway key.
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development").lower()
+IS_PRODUCTION = ENVIRONMENT == "production"
+
+# Anonymous access is a convenience for local development only, and it is now
+# OFF by default even in development: the old code returned an anonymous user
+# whenever ENVIRONMENT was unset, so a fresh checkout served every protected
+# route without a token. Opt in explicitly with ALLOW_ANONYMOUS_AUTH=1, and
+# never in production.
+ALLOW_ANONYMOUS_AUTH = (
+    not IS_PRODUCTION and os.getenv("ALLOW_ANONYMOUS_AUTH", "0").lower() in ("1", "true", "yes")
+)
+
 SECRET_KEY = os.getenv("JWT_SECRET_KEY")
 if not SECRET_KEY:
-    if os.getenv("ENV", "development").lower() == "production":
+    if IS_PRODUCTION:
         raise RuntimeError(
             "JWT_SECRET_KEY must be set in production. Refusing to start with an "
             "ephemeral key that would invalidate all tokens on restart."
@@ -112,7 +124,10 @@ def decode_access_token(token: str) -> Dict:
         return payload
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token has expired")
-    except jwt.JWTError:
+    except jwt.InvalidTokenError:
+        # PyJWT's base "bad token" class. There is no jwt.JWTError (that's
+        # python-jose); catching it would raise AttributeError and turn every
+        # malformed token into a 500 instead of a 401.
         raise HTTPException(status_code=401, detail="Invalid token")
 
 
@@ -177,8 +192,8 @@ async def get_current_user(
         except:
             pass
 
-    # For testing/development, allow unauthenticated access with warning
-    if os.getenv("ENVIRONMENT", "development") == "development":
+    # Anonymous fallback only when explicitly enabled (never in production).
+    if ALLOW_ANONYMOUS_AUTH:
         return "anonymous-dev-user"
 
     raise HTTPException(
@@ -225,8 +240,8 @@ async def get_current_user_full(
         except:
             pass
 
-    # For testing/development
-    if os.getenv("ENVIRONMENT", "development") == "development":
+    # Anonymous fallback only when explicitly enabled (never in production).
+    if ALLOW_ANONYMOUS_AUTH:
         return {
             "user_id": "anonymous-dev-user",
             "username": "anonymous",
