@@ -36,8 +36,15 @@ class TradeLogReplayer:
         # Setup the CSV file path
         self.csv_file = Path(csv_file)
         
-        # Set the template directory
-        self.template_dir = template_dir or "templates"
+        # Set the template directory. Flask resolves a relative template_folder
+        # against THIS module's directory (src/visualization/), not the process
+        # CWD — so a bare "templates" pointed at a folder that does not exist and
+        # every render_template raised TemplateNotFound (a 500 on "/"). Anchor it
+        # at the repo root, where templates/ actually lives.
+        if template_dir is None:
+            repo_root = Path(__file__).resolve().parents[2]
+            template_dir = str(repo_root / "templates")
+        self.template_dir = template_dir
         
         # Initialize replay state
         self.trades = []
@@ -1396,12 +1403,16 @@ class TradeLogReplayer:
             
             # Run the server (this blocks)
             self.app.config['DEBUG'] = Config.DEBUG
+            # allow_unsafe_werkzeug: current Flask-SocketIO refuses to start the
+            # Werkzeug dev server without it. This is a teaching/replay server,
+            # never a production endpoint, so the dev server is exactly right.
             self.socketio.run(
                 self.app,
                 host=Config.HOST,
                 port=port,
                 debug=Config.DEBUG,
-                use_reloader=False
+                use_reloader=False,
+                allow_unsafe_werkzeug=True
             )
             
         except Exception as e:

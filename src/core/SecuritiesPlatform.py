@@ -230,10 +230,15 @@ try:
     from fastapi import FastAPI, HTTPException
     from pydantic import BaseModel
     app = FastAPI()
-except ImportError:
-    # FastAPI not installed, skip API layer
+except Exception:
+    # The API layer is optional. Catch more than ImportError: an incompatible
+    # FastAPI/Starlette pairing raises a TypeError at FastAPI() construction,
+    # and this module is imported by the core order-book code and its tests,
+    # which do not need the web layer. Degrade to "no API layer" cleanly rather
+    # than taking down every importer over an optional dependency.
     app = None
     BaseModel = object
+    HTTPException = Exception
 
 
 class CreateLoanRequest(BaseModel):

@@ -146,6 +146,42 @@ class RiskEngine:
         """Add or update user risk profile."""
         self.risk_profiles[profile.user_id] = profile
 
+    def default_retail_profile(self, user_id: str) -> RiskProfile:
+        """A permissive default profile for a user who has none configured.
+
+        A real venue provisions profiles at onboarding; this teaching
+        exchange auto-creates a retail-tier profile so the risk checks
+        actually run (rather than rejecting every unconfigured user) while
+        staying overridable via add_risk_profile.
+        """
+        return RiskProfile(
+            user_id=user_id,
+            tier="retail",
+            max_position_size=Decimal("1000000"),
+            max_daily_loss=Decimal("100000"),
+            max_order_size=Decimal("100000"),
+            max_open_orders=1000,
+            max_daily_trades=100000,
+            max_leverage=Decimal("1"),
+            concentration_limit=Decimal("100"),  # percent: 100 = no single-asset cap
+            required_margin=Decimal("0"),
+        )
+
+    async def check_order(self, order: Dict) -> Dict:
+        """Async adapter the OMS calls: run the pre-trade checks and return
+        {'approved': bool, 'reason': str}.
+
+        The OMS awaits this and reads 'approved'/'reason'. The real check is
+        check_pre_trade_risk (sync, returns a (bool, reason) tuple); this wraps
+        it. A user with no profile gets a default retail profile rather than an
+        automatic rejection, so the check is real without blocking dev use.
+        """
+        user_id = order.get("user_id")
+        if user_id and user_id not in self.risk_profiles:
+            self.add_risk_profile(self.default_retail_profile(user_id))
+        approved, reason = self.check_pre_trade_risk(order)
+        return {"approved": approved, "reason": reason}
+
     def update_market_price(self, symbol: str, price: Decimal):
         """Update market price for risk calculations."""
         self.market_prices[symbol] = price

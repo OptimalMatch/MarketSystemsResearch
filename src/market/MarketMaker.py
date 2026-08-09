@@ -172,13 +172,14 @@ class MarketMaker:
         # Update last price
         stats['last_price'] = current_price
         
-        # Calculate volatility
-        if len(self.price_history[security]) >= 2:
+        # Calculate volatility. stdev needs at least two data points, so we
+        # need at least three prices (two returns) before it is defined.
+        if len(self.price_history[security]) >= 3:
             returns = [
                 (Decimal(str(p2)) / Decimal(str(p1))) - Decimal('1')
                 for p1, p2 in zip(self.price_history[security][:-1], self.price_history[security][1:])
             ]
-            if returns:
+            if len(returns) >= 2:
                 stats['volatility'] = Decimal(str(statistics.stdev([float(r) for r in returns])))
         
         # Calculate trend

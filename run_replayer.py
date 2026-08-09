@@ -20,8 +20,12 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Now import and run the replayer
+    # Now import and run the replayer. The constructor takes the CSV path
+    # (and an optional template_dir); speed is a mutable attribute and the
+    # server is started with .start(port). The previous version passed
+    # speed=/port= to the constructor and called a nonexistent .run().
     from src.visualization.TradeLogReplayer import TradeLogReplayer
 
-    replayer = TradeLogReplayer(args.log_file, speed=args.speed, port=args.port)
-    replayer.run()
+    replayer = TradeLogReplayer(args.log_file)
+    replayer.speed_factor = args.speed
+    replayer.start(port=args.port)
