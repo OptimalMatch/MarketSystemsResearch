@@ -41,7 +41,7 @@ print(f"Orders processed: {num_orders:,}")
 print(f"Time: {elapsed:.3f} seconds")
 print(f"Throughput: {orders_per_sec:,.0f} orders/second")
 print(f"Trades executed: {stats['total_trades']:,}")
-print(f"Average latency: {(elapsed/num_orders)*1000000:.2f} nanoseconds")
+print(f"Average latency: {(elapsed/num_orders)*1_000_000:.2f} microseconds")
 
 if orders_per_sec > 1000000:
     print("✅ EXCEEDED 1M orders/second target!")

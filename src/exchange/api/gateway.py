@@ -13,9 +13,9 @@ from datetime import datetime
 import asyncio
 import json
 import logging
+import os
 
-from ..matching_engine.engine import OrderType, TimeInForce, OrderStatus
-from ..matching_engine.ultra_fast_engine import UltraFastMatchingEngine
+from ..matching_engine.engine import OrderType, TimeInForce, OrderStatus, MatchingEngine
 from ..order_management.oms import OrderManagementSystem
 from ..risk_management.risk_engine import RiskEngine, RiskProfile
 from .auth import get_current_user, get_current_user_full, check_rate_limit, init_db_pool
@@ -24,15 +24,14 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Exchange API", version="1.0.0")
 
-# Add CORS middleware to allow browser requests
+# Add CORS middleware to allow browser requests. Origins come from
+# CORS_ALLOW_ORIGINS (comma-separated) so deployments set their own; the default
+# covers local development only. Don't commit machine-specific hostnames here.
+_default_origins = "http://localhost:13080,http://localhost:3000,http://localhost:8080"
+_cors_origins = [o.strip() for o in os.getenv("CORS_ALLOW_ORIGINS", _default_origins).split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:13080",   # Admin interface
-        "http://pop-os-1:13080",    # Admin interface via hostname
-        "http://localhost:3000",    # Development
-        "http://localhost:8080",    # Alternative dev port
-    ],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -44,13 +43,19 @@ security = HTTPBearer()
 oms = OrderManagementSystem()
 risk_engine = RiskEngine()
 
-# Initialize matching engines for market data
-engines = {
-    "DEC/USD": UltraFastMatchingEngine("DEC/USD"),
-    "BTC/USD": UltraFastMatchingEngine("BTC/USD"),
-    "ETH/USD": UltraFastMatchingEngine("ETH/USD"),
-    "DEC/BTC": UltraFastMatchingEngine("DEC/BTC")
-}
+# One matching engine, registered with the OMS router, is the single source of
+# truth for both order flow and market data. The market-data endpoints read the
+# very engine the OMS writes to, so an order placed here shows up in that same
+# engine's book, trades, and ticker — there is no second registry to drift out
+# of sync. (The earlier code kept a separate per-symbol engine dict for market
+# data while orders went to an unregistered router, so the two never agreed.)
+SYMBOLS = ["DEC/USD", "BTC/USD", "ETH/USD", "DEC/BTC"]
+matching_engine = MatchingEngine()
+oms.router.register_engine("primary", matching_engine, SYMBOLS)
+for _symbol in SYMBOLS:
+    # The validator rejects any symbol it has no config for; empty config uses
+    # its built-in defaults (min/max quantity, tick size).
+    oms.validator.add_symbol_config(_symbol, {})
 
 
 # Pydantic models for API
@@ -106,7 +111,7 @@ async def place_order(
     try:
         order_dict = {
             "user_id": user_id,
-            "symbol": request.symbol,
+            "symbol": request.symbol.replace("-", "/"),
             "side": request.side,
             "order_type": request.order_type,
             "quantity": request.quantity,
@@ -118,10 +123,12 @@ async def place_order(
             "reduce_only": request.reduce_only
         }
 
-        # Check risk
-        risk_check = risk_engine.check_pre_trade_risk(order_dict)
-        if not risk_check[0]:
-            raise HTTPException(status_code=400, detail=risk_check[1])
+        # Check risk. check_order provisions a default profile for a first-time
+        # user, so a new account is not rejected outright; the sync
+        # check_pre_trade_risk assumes the profile already exists.
+        risk_check = await risk_engine.check_order(order_dict)
+        if not risk_check["approved"]:
+            raise HTTPException(status_code=400, detail=risk_check["reason"])
 
         # Submit order
         result = await oms.submit_order(order_dict)
@@ -131,6 +138,10 @@ async def place_order(
 
         return result
 
+    except HTTPException:
+        # A deliberate 4xx (bad request, rejected order) must not be relabeled
+        # as a 500 by the catch-all below.
+        raise
     except Exception as e:
         logger.error(f"Order placement error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -150,6 +161,8 @@ async def cancel_order(
 
         return result
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Order cancellation error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -176,6 +189,8 @@ async def modify_order(
 
         return result
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Order modification error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -211,44 +226,11 @@ async def get_order(
 
         return order
 
+    except HTTPException:
+        raise
+
     except Exception as e:
         logger.error(f"Get order error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/v1/market/{symbol}/orderbook")
-async def get_orderbook(symbol: str, depth: int = 20):
-    """Get order book for symbol."""
-    try:
-        # Get from matching engine
-        for engine in oms.router.engines.values():
-            orderbook = engine.get_order_book(symbol, depth)
-            if orderbook:
-                return orderbook
-
-        raise HTTPException(status_code=404, detail="Symbol not found")
-
-    except Exception as e:
-        logger.error(f"Get orderbook error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/v1/account/balance")
-async def get_balance(user_id: str = Depends(get_current_user)):
-    """Get account balance."""
-    try:
-        # This would connect to custody/settlement system
-        return {
-            "user_id": user_id,
-            "balances": {
-                "USD": "10000.00",
-                "BTC": "0.5",
-                "ETH": "10.0"
-            }
-        }
-
-    except Exception as e:
-        logger.error(f"Get balance error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -396,17 +378,16 @@ async def get_orderbook(
     # Normalize symbol format
     symbol = symbol.replace("-", "/")
 
-    if symbol not in engines:
+    orderbook = matching_engine.get_order_book(symbol, depth)
+    if orderbook is None:
         raise HTTPException(status_code=404, detail=f"Symbol {symbol} not found")
-
-    engine = engines[symbol]
-    orderbook = engine.get_order_book_snapshot(depth)
 
     return {
         "symbol": symbol,
         "bids": orderbook.get("bids", []),
         "asks": orderbook.get("asks", []),
-        "timestamp": datetime.utcnow().isoformat()
+        "last_price": orderbook.get("last_price"),
+        "timestamp": orderbook.get("timestamp", datetime.utcnow().isoformat()),
     }
 
 
@@ -419,60 +400,49 @@ async def get_recent_trades(
     # Normalize symbol format
     symbol = symbol.replace("-", "/")
 
-    if symbol not in engines:
+    if symbol not in matching_engine.order_books:
         raise HTTPException(status_code=404, detail=f"Symbol {symbol} not found")
 
-    # For now, return mock trades (in production, query from database)
-    trades = []
-    engine = engines[symbol]
-    stats = engine.get_stats()
-
-    # Generate some mock trades based on current orderbook
-    orderbook = engine.get_order_book_snapshot(5)
-    if orderbook.get("bids") and orderbook.get("asks"):
-        mid_price = (orderbook["bids"][0][0] + orderbook["asks"][0][0]) / 2
-
-        import random
-        for i in range(min(limit, 10)):
-            trades.append({
-                "id": f"trade_{i}",
-                "price": mid_price + random.uniform(-0.5, 0.5),
-                "quantity": random.uniform(0.1, 10.0),
-                "side": "buy" if random.random() > 0.5 else "sell",
-                "timestamp": (datetime.utcnow() - timedelta(seconds=i*10)).isoformat()
-            })
-
-    return trades
+    # Real trades from the engine's trade log — no fabrication. Fees are the
+    # ones the engine actually charged.
+    return matching_engine.get_recent_trades(symbol, limit)
 
 
 @app.get("/api/v1/market/ticker/{symbol}")
 async def get_ticker(symbol: str):
-    """Get 24hr ticker statistics for a symbol."""
+    """Get ticker statistics for a symbol."""
     # Normalize symbol format
     symbol = symbol.replace("-", "/")
 
-    if symbol not in engines:
+    if symbol not in matching_engine.order_books:
         raise HTTPException(status_code=404, detail=f"Symbol {symbol} not found")
 
-    engine = engines[symbol]
-    orderbook = engine.get_order_book_snapshot(1)
-    stats = engine.get_stats()
+    orderbook = matching_engine.get_order_book(symbol, 1)
+    stats = matching_engine.get_stats(symbol)
 
-    # Calculate ticker data
-    bid = orderbook["bids"][0][0] if orderbook.get("bids") else 0
-    ask = orderbook["asks"][0][0] if orderbook.get("asks") else 0
-    last = (bid + ask) / 2 if bid and ask else 100.0
+    # Snapshot bids/asks are dicts of {"price", "quantity"}.
+    bids = orderbook.get("bids") or []
+    asks = orderbook.get("asks") or []
+    bid = bids[0]["price"] if bids else None
+    ask = asks[0]["price"] if asks else None
+    last = stats.get("last_price")
 
     return {
         "symbol": symbol,
         "bid": bid,
         "ask": ask,
         "last": last,
-        "volume_24h": stats.get("total_volume", 0),
-        "trades_24h": stats.get("total_trades", 0),
-        "high_24h": last * 1.05,  # Mock data
-        "low_24h": last * 0.95,   # Mock data
-        "change_24h": 2.5,         # Mock data
+        # volume/trades are real session totals from the engine (cumulative
+        # since process start, not a rolling 24h window — the in-memory engine
+        # keeps no time-bucketed history).
+        "volume": stats.get("volume", "0"),
+        "trades": stats.get("trades", 0),
+        # 24h high/low/change need historical data this in-memory engine does
+        # not retain. Return null rather than fabricate: the old code invented
+        # last*1.05 / last*0.95 / a hardcoded 2.5% and shipped it as real.
+        "high_24h": None,
+        "low_24h": None,
+        "change_24h": None,
         "timestamp": datetime.utcnow().isoformat()
     }
 
@@ -480,9 +450,10 @@ async def get_ticker(symbol: str):
 @app.get("/api/v1/market/symbols")
 async def get_symbols():
     """Get list of all trading symbols."""
+    symbols = list(matching_engine.order_books.keys())
     return {
-        "symbols": list(engines.keys()),
-        "count": len(engines)
+        "symbols": symbols,
+        "count": len(symbols)
     }
 
 

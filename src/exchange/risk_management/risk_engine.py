@@ -192,7 +192,14 @@ class RiskEngine:
         symbol = order["symbol"]
         side = order["side"]
         quantity = Decimal(str(order["quantity"]))
-        price = Decimal(str(order.get("price", 0)))
+        # A market order carries no price (the key is present but None), so
+        # order.get("price", 0) returns None and Decimal("None") would raise.
+        # Fall back to the last known market price, then to 0. Use `or` rather
+        # than a default arg because the crash is a None value, not a missing key.
+        raw_price = order.get("price")
+        if raw_price in (None, ""):
+            raw_price = self.market_prices.get(symbol, 0)
+        price = Decimal(str(raw_price))
 
         # Get user risk profile
         if user_id not in self.risk_profiles:

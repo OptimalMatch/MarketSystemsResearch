@@ -185,6 +185,17 @@ const Analytics: React.FC = () => {
         System Analytics & Monitoring
       </Typography>
 
+      {/* This page shows illustrative sample data, not real telemetry. There is
+          no analytics/metrics endpoint yet, so the throughput, latency, and
+          system numbers below are generated client-side. Labeled rather than
+          silently faked. */}
+      <Alert severity="warning" sx={{ mb: 3 }}>
+        <strong>Sample data.</strong> These charts are illustrative — the
+        backend has no analytics endpoint yet, so throughput, latency, and
+        system metrics here are generated in the browser, not measured. Do not
+        read them as real performance.
+      </Alert>
+
       {/* Key Metrics Overview */}
       <Grid container spacing={3} sx={{ mb: 3 }}>
         <Grid item xs={12} sm={6} md={3}>
