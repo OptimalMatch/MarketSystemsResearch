@@ -299,16 +299,24 @@ class EnhancedMatchingEngine:
         )
 
         if next_slice:
-            # Place the next slice. The slice dict carries both "symbol" and
-            # "side"; the original passed symbol as the side, so every iceberg
-            # refill was placed on a side named e.g. "BTC/USD".
-            self.place_order(
-                side=next_slice["side"],
-                price=float(next_slice["price"]),
-                quantity=float(next_slice["quantity"]),
-                user_id=0,  # Would need to track this properly
-                order_type="limit",
-                external_id=next_slice["order_id"],
+            # Place the next slice the same way the FIRST slice was placed:
+            # through _place_limit_order with parent_order_id set. The original
+            # refilled through the public place_order, which drops the parent
+            # link — so the slice after the first refill never routed back
+            # here, and the iceberg stalled with its hidden quantity stranded.
+            # The owner comes from the iceberg record rather than a hardcoded 0.
+            iceberg = self.advanced_orders.iceberg_orders.get(parent_order_id)
+            owner = int(iceberg.user_id) if iceberg and iceberg.user_id.isdigit() else 0
+            order_id = self.order_id_counter
+            self.order_id_counter += 1
+            timestamp = self.timestamp_counter
+            self.timestamp_counter += 1
+            self._place_limit_order(
+                next_slice["side"],
+                float(next_slice["price"]),
+                float(next_slice["quantity"]),
+                owner, order_id, timestamp,
+                parent_order_id=parent_order_id,
                 metadata={"iceberg": True, "parent": parent_order_id}
             )
 
@@ -347,10 +355,21 @@ class EnhancedMatchingEngine:
 
             # Place the triggered order as a market order
             if trigger_type in ["stop_loss", "trailing_stop", "take_profit"]:
-                # Convert to market order
+                # Promote to an aggressively-priced limit: a market order with a
+                # 10% protection band. The band must be side-aware — a buy caps
+                # ABOVE the market so it crosses the asks, a sell floors BELOW
+                # so it crosses the bids. (As shipped this was current*1.1 for
+                # both sides, which turned every triggered SELL into a limit
+                # 10% above a falling market: a stop-loss that could not sell.)
+                if hasattr(order, 'limit_price') and order.limit_price:
+                    band_price = float(order.limit_price)
+                elif order.side == "buy":
+                    band_price = current_price * 1.1
+                else:
+                    band_price = current_price * 0.9
                 self.place_order(
                     side=order.side,
-                    price=float(order.limit_price) if hasattr(order, 'limit_price') and order.limit_price else current_price * 1.1,
+                    price=band_price,
                     quantity=float(order.quantity),
                     user_id=int(order.user_id) if order.user_id.isdigit() else 0,
                     order_type="limit",
