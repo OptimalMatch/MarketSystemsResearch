@@ -347,10 +347,21 @@ class EnhancedMatchingEngine:
 
             # Place the triggered order as a market order
             if trigger_type in ["stop_loss", "trailing_stop", "take_profit"]:
-                # Convert to market order
+                # Promote to an aggressively-priced limit: a market order with a
+                # 10% protection band. The band must be side-aware — a buy caps
+                # ABOVE the market so it crosses the asks, a sell floors BELOW
+                # so it crosses the bids. (As shipped this was current*1.1 for
+                # both sides, which turned every triggered SELL into a limit
+                # 10% above a falling market: a stop-loss that could not sell.)
+                if hasattr(order, 'limit_price') and order.limit_price:
+                    band_price = float(order.limit_price)
+                elif order.side == "buy":
+                    band_price = current_price * 1.1
+                else:
+                    band_price = current_price * 0.9
                 self.place_order(
                     side=order.side,
-                    price=float(order.limit_price) if hasattr(order, 'limit_price') and order.limit_price else current_price * 1.1,
+                    price=band_price,
                     quantity=float(order.quantity),
                     user_id=int(order.user_id) if order.user_id.isdigit() else 0,
                     order_type="limit",
