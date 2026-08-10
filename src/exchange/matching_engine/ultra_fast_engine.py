@@ -108,6 +108,16 @@ class UltraFastMatchingEngine:
                 # Peek at best sell order
                 best_price, _, best_order = self.sell_orders[0]
 
+                # A cancelled order rests in the heap as a tombstone (quantity
+                # zero, already absent from order_map). Discard it here, before
+                # the trade math: otherwise it prints a phantom zero-quantity
+                # trade against a cancelled counterparty and then crashes on
+                # the order_map delete below.
+                if best_order.quantity <= 0:
+                    heapq.heappop(self.sell_orders)
+                    self.order_map.pop(best_order.id, None)
+                    continue
+
                 # Check if prices cross
                 if incoming_order.price >= best_order.price:
                     # Execute trade
@@ -148,6 +158,12 @@ class UltraFastMatchingEngine:
                 # Peek at best buy order
                 neg_price, _, best_order = self.buy_orders[0]
                 best_price = -neg_price
+
+                # Same tombstone guard as the buy side (see above).
+                if best_order.quantity <= 0:
+                    heapq.heappop(self.buy_orders)
+                    self.order_map.pop(best_order.id, None)
+                    continue
 
                 # Check if prices cross
                 if incoming_order.price <= best_order.price:
